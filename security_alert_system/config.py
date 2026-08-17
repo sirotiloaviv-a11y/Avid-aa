@@ -1,0 +1,128 @@
+"""Configuration, loaded from environment variables (and an optional .env)."""
+
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from .keywords import DEFAULT_RULES, KeywordMatcher
+
+BASE_DIR = Path(__file__).resolve().parent
+
+
+def _load_dotenv(path: Path) -> None:
+    """Minimal .env loader — no dependency, does not overwrite real env vars."""
+    if not path.is_file():
+        return
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key, value = key.strip(), value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        os.environ.setdefault(key, value)
+
+
+def _env_list(name: str, default: str = "") -> list[str]:
+    raw = os.getenv(name, default)
+    return [item.strip() for item in raw.replace("\n", ",").split(",") if item.strip()]
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, "") or default)
+    except ValueError:
+        return default
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    return (os.getenv(name, "") or str(default)).strip().lower() in {"1", "true", "yes", "on"}
+
+
+# Israeli news feeds that publish security items quickly. Override with RSS_FEEDS.
+DEFAULT_FEEDS: tuple[str, ...] = (
+    "https://www.ynet.co.il/Integration/StoryRss1854.xml",   # ynet — ביטחון
+    "https://www.ynet.co.il/Integration/StoryRss2.xml",      # ynet — חדשות
+    "https://rcs.mako.co.il/rss/news-military.xml",          # mako — צבא וביטחון
+    "https://www.israelhayom.co.il/rss.xml",                 # ישראל היום
+    "https://www.maariv.co.il/Rss/RssFeedsMivzakiZahav",     # מעריב — מבזקים
+)
+
+
+@dataclass
+class Config:
+    # --- Telegram -------------------------------------------------------
+    bot_token: str = ""
+    alert_chat_id: str = ""
+    # Channels the bot is an ADMIN of. The Bot API cannot read channels you
+    # do not control — see README for the RSS-bridge workaround.
+    telegram_channels: list[str] = field(default_factory=list)
+
+    # --- Sources --------------------------------------------------------
+    rss_feeds: list[str] = field(default_factory=lambda: list(DEFAULT_FEEDS))
+    rss_poll_seconds: int = 60
+    telegram_poll_seconds: int = 25
+    http_timeout_seconds: int = 20
+    max_items_per_feed: int = 25
+
+    # --- Behaviour ------------------------------------------------------
+    matcher: KeywordMatcher = field(default_factory=lambda: KeywordMatcher(DEFAULT_RULES))
+    state_path: Path = BASE_DIR / "state" / "seen.json"
+    state_max_entries: int = 5000
+    # Suppress repeats of the same phrase from the same source for N seconds.
+    cooldown_seconds: int = 0
+    prime_without_alerting: bool = True
+    log_level: str = "INFO"
+
+    # --- Cameras (see cameras.py) --------------------------------------
+    cameras_enabled: bool = False
+    camera_snapshot_on_severity: str = "CRITICAL"
+
+    @classmethod
+    def from_env(cls, dotenv: Path | None = None) -> "Config":
+        _load_dotenv(dotenv or BASE_DIR.parent / ".env")
+        _load_dotenv(BASE_DIR / ".env")
+
+        keywords_spec = os.getenv("KEYWORDS", "").strip()
+        matcher = (
+            KeywordMatcher.from_spec(keywords_spec)
+            if keywords_spec
+            else KeywordMatcher(DEFAULT_RULES)
+        )
+
+        feeds = _env_list("RSS_FEEDS") or list(DEFAULT_FEEDS)
+
+        return cls(
+            bot_token=os.getenv("TELEGRAM_BOT_TOKEN", "").strip(),
+            alert_chat_id=os.getenv("TELEGRAM_ALERT_CHAT_ID", "").strip(),
+            telegram_channels=_env_list("TELEGRAM_CHANNELS"),
+            rss_feeds=feeds,
+            rss_poll_seconds=_env_int("RSS_POLL_SECONDS", 60),
+            telegram_poll_seconds=_env_int("TELEGRAM_POLL_SECONDS", 25),
+            http_timeout_seconds=_env_int("HTTP_TIMEOUT_SECONDS", 20),
+            max_items_per_feed=_env_int("MAX_ITEMS_PER_FEED", 25),
+            matcher=matcher,
+            state_path=Path(os.getenv("STATE_PATH", str(BASE_DIR / "state" / "seen.json"))),
+            state_max_entries=_env_int("STATE_MAX_ENTRIES", 5000),
+            cooldown_seconds=_env_int("ALERT_COOLDOWN_SECONDS", 0),
+            prime_without_alerting=_env_bool("PRIME_WITHOUT_ALERTING", True),
+            log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
+            cameras_enabled=_env_bool("CAMERAS_ENABLED", False),
+            camera_snapshot_on_severity=os.getenv("CAMERA_SNAPSHOT_ON_SEVERITY", "CRITICAL").upper(),
+        )
+
+    def validate(self) -> list[str]:
+        """Return a list of fatal configuration problems (empty means OK)."""
+        problems: list[str] = []
+        if not self.bot_token:
+            problems.append("TELEGRAM_BOT_TOKEN is not set.")
+        if not self.alert_chat_id:
+            problems.append("TELEGRAM_ALERT_CHAT_ID is not set.")
+        if not self.rss_feeds and not self.telegram_channels:
+            problems.append("No sources configured (RSS_FEEDS and TELEGRAM_CHANNELS are both empty).")
+        if self.rss_poll_seconds < 15:
+            problems.append("RSS_POLL_SECONDS below 15 is abusive to news sites; raise it.")
+        return problems

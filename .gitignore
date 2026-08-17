@@ -1,0 +1,16 @@
+# Secrets — never commit
+.env
+*.env
+!.env.example
+
+# Runtime state
+security_alert_system/state/
+security_alert_system/cameras.json
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
