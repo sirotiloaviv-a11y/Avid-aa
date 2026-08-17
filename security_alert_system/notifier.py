@@ -9,6 +9,7 @@ import time
 from .alerts import Alert
 from .cameras import CameraRegistry
 from .keywords import Severity
+from .monitoring import Runtime
 from .telegram_api import TelegramClient, TelegramError
 
 log = logging.getLogger(__name__)
@@ -24,11 +25,13 @@ class Notifier:
         chat_id: str,
         cameras: CameraRegistry | None = None,
         snapshot_threshold: Severity = Severity.CRITICAL,
+        runtime: Runtime | None = None,
     ):
         self._client = client
         self._chat_id = chat_id
         self._cameras = cameras
         self._snapshot_threshold = snapshot_threshold
+        self._runtime = runtime
         self._lock = asyncio.Lock()
         self._last_send = 0.0
 
@@ -46,7 +49,13 @@ class Notifier:
             await self._throttled_send(alert.to_html())
         except TelegramError as exc:
             log.error("Failed to deliver alert from %s: %s", alert.source, exc)
+            # A failed delivery is exactly what the dashboard needs to surface.
+            if self._runtime:
+                self._runtime.record_alert(alert, delivered=False)
             return False
+
+        if self._runtime:
+            self._runtime.record_alert(alert, delivered=True)
 
         log.info(
             "ALERT [%s] %s — %s | %s",

@@ -15,6 +15,7 @@ import httpx
 
 from ..alerts import Alert
 from ..config import Config
+from ..monitoring import Runtime
 from ..notifier import Notifier
 from ..state import StateStore
 
@@ -36,10 +37,17 @@ def strip_html(raw: str) -> str:
 class RSSMonitor:
     """One instance polls every configured feed on a fixed interval."""
 
-    def __init__(self, config: Config, notifier: Notifier, state: StateStore):
+    def __init__(
+        self,
+        config: Config,
+        notifier: Notifier,
+        state: StateStore,
+        runtime: Runtime | None = None,
+    ):
         self._config = config
         self._notifier = notifier
         self._state = state
+        self._runtime = runtime
         # Conditional-GET bookkeeping per feed, so we re-download only on change.
         self._etags: dict[str, str] = {}
         self._modified: dict[str, str] = {}
@@ -85,6 +93,12 @@ class RSSMonitor:
             if isinstance(result, BaseException):
                 log.warning("Feed %s failed: %s", url, result)
 
+    def _health(self, url: str):
+        """Health entry for a feed, keyed by its title once we know it."""
+        if not self._runtime:
+            return None
+        return self._runtime.source(self._feed_titles.get(url, url), "rss")
+
     async def _poll_feed(self, client: httpx.AsyncClient, url: str, alerting: bool) -> None:
         headers: dict[str, str] = {}
         if etag := self._etags.get(url):
@@ -92,17 +106,24 @@ class RSSMonitor:
         if modified := self._modified.get(url):
             headers["If-Modified-Since"] = modified
 
+        health = self._health(url)
         try:
             response = await client.get(url, headers=headers)
         except httpx.HTTPError as exc:
             log.warning("Could not fetch %s: %s", url, exc)
+            if health:
+                health.record_error(f"{type(exc).__name__}: {exc}")
             return
 
         if response.status_code == 304:
             log.debug("Feed unchanged: %s", url)
+            if health:
+                health.record_success()
             return
         if response.status_code >= 400:
             log.warning("Feed %s returned HTTP %d.", url, response.status_code)
+            if health:
+                health.record_error(f"HTTP {response.status_code}")
             return
 
         if tag := response.headers.get("ETag"):
@@ -113,12 +134,20 @@ class RSSMonitor:
         parsed = await asyncio.to_thread(feedparser.parse, response.content)
         if parsed.bozo and not parsed.entries:
             log.warning("Could not parse feed %s: %s", url, parsed.get("bozo_exception"))
+            if health:
+                health.record_error(f"parse error: {parsed.get('bozo_exception')}")
             return
 
         feed_title = (parsed.feed.get("title") or url).strip()
+        if self._runtime and url not in self._feed_titles:
+            self._runtime.rename_source(url, feed_title)
         self._feed_titles[url] = feed_title
 
-        for entry in parsed.entries[: self._config.max_items_per_feed]:
+        entries = parsed.entries[: self._config.max_items_per_feed]
+        if health := self._health(url):
+            health.record_success(items=len(entries))
+
+        for entry in entries:
             await self._handle_entry(url, feed_title, entry, alerting)
 
     async def _handle_entry(self, feed_url: str, feed_title: str, entry, alerting: bool) -> None:

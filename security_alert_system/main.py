@@ -1,9 +1,10 @@
 """Entry point.
 
-    python -m security_alert_system.main            # run the monitor
-    python -m security_alert_system.main --test     # send a test alert and exit
-    python -m security_alert_system.main --check    # validate config and exit
-    python -m security_alert_system.main --chat-id  # discover your chat id
+    python -m security_alert_system.main             # run the monitor
+    python -m security_alert_system.main --test      # send a test alert and exit
+    python -m security_alert_system.main --check     # validate config and exit
+    python -m security_alert_system.main --chat-id   # discover your chat id
+    python -m security_alert_system.main --dashboard # serve the dashboard only
 """
 
 from __future__ import annotations
@@ -18,7 +19,9 @@ from datetime import datetime, timezone
 from .alerts import Alert
 from .cameras import CameraRegistry
 from .config import BASE_DIR, Config
+from .dashboard import DashboardServer
 from .keywords import Match, Severity
+from .monitoring import Runtime
 from .notifier import Notifier
 from .sources import RSSMonitor, TelegramChannelMonitor
 from .state import StateStore
@@ -58,6 +61,9 @@ async def run_monitor(config: Config) -> int:
     state = StateStore(config.state_path, config.state_max_entries)
     cameras = CameraRegistry.from_env(BASE_DIR)
     threshold = getattr(Severity, config.camera_snapshot_on_severity, Severity.CRITICAL)
+    runtime = Runtime(config.alert_history_size, config.alert_history_path)
+    for feed in config.rss_feeds:
+        runtime.source(feed, "rss")
 
     stop = asyncio.Event()
     install_signal_handlers(stop)
@@ -70,7 +76,7 @@ async def run_monitor(config: Config) -> int:
             return 1
         log.info("Connected as @%s (%s).", me.get("username"), me.get("id"))
 
-        notifier = Notifier(client, config.alert_chat_id, cameras, threshold)
+        notifier = Notifier(client, config.alert_chat_id, cameras, threshold, runtime)
 
         log.info("Watching %d RSS feed(s): %s", len(config.rss_feeds),
                  ", ".join(config.rss_feeds))
@@ -88,13 +94,28 @@ async def run_monitor(config: Config) -> int:
             f"🔑 מילות מפתח: {len(config.matcher.rules)}"
         )
 
-        rss = RSSMonitor(config, notifier, state)
-        telegram = TelegramChannelMonitor(config, client, notifier, state)
+        rss = RSSMonitor(config, notifier, state, runtime)
+        telegram = TelegramChannelMonitor(config, client, notifier, state, runtime)
 
         tasks = [
             asyncio.create_task(rss.run(stop), name="rss"),
             asyncio.create_task(telegram.run(stop), name="telegram"),
         ]
+
+        if config.dashboard_enabled:
+            server = DashboardServer(
+                runtime,
+                config.dashboard_host,
+                config.dashboard_port,
+                config.dashboard_token,
+                context={
+                    "keyword_count": len(config.matcher.rules),
+                    "feed_count": len(config.rss_feeds),
+                    "channel_count": len(config.telegram_channels),
+                    "cameras": cameras.describe(),
+                },
+            )
+            tasks.append(asyncio.create_task(server.run(stop), name="dashboard"))
         try:
             await stop.wait()
         finally:
@@ -103,6 +124,7 @@ async def run_monitor(config: Config) -> int:
                 task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
             state.save(force=True)
+            runtime.save()
             log.info("Shut down cleanly.")
     return 0
 
@@ -158,6 +180,39 @@ async def show_chat_id(config: Config) -> int:
     return 0
 
 
+async def serve_dashboard_only(config: Config) -> int:
+    """Serve the dashboard against the persisted history, without monitoring.
+
+    Handy for inspecting past alerts, or for viewing the page at all when no
+    bot token is configured yet.
+    """
+    runtime = Runtime(config.alert_history_size, config.alert_history_path)
+    for feed in config.rss_feeds:
+        runtime.source(feed, "rss")
+    for channel in config.telegram_channels:
+        runtime.source(channel, "telegram")
+
+    cameras = CameraRegistry.from_env(BASE_DIR)
+    stop = asyncio.Event()
+    install_signal_handlers(stop)
+
+    server = DashboardServer(
+        runtime,
+        config.dashboard_host,
+        config.dashboard_port,
+        config.dashboard_token,
+        context={
+            "keyword_count": len(config.matcher.rules),
+            "feed_count": len(config.rss_feeds),
+            "channel_count": len(config.telegram_channels),
+            "cameras": cameras.describe(),
+        },
+    )
+    log.info("Dashboard-only mode: no feeds are being polled.")
+    await server.run(stop)
+    return 0
+
+
 def check_config(config: Config) -> int:
     problems = config.validate()
     print(f"RSS feeds ({len(config.rss_feeds)}):")
@@ -170,6 +225,12 @@ def check_config(config: Config) -> int:
     for rule in config.matcher.rules:
         print(f"  - {rule.phrase}  [{rule.severity.name}]")
     print(f"State file: {config.state_path}")
+    print(f"Alert history: {config.alert_history_path}")
+    if config.dashboard_enabled:
+        print(f"Dashboard: http://{config.dashboard_host}:{config.dashboard_port}/"
+              f"  (token {'set' if config.dashboard_token else 'not set'})")
+    else:
+        print("Dashboard: disabled")
     print(CameraRegistry.from_env(BASE_DIR).describe())
     if problems:
         print("\nProblems:")
@@ -185,6 +246,8 @@ def main() -> int:
     parser.add_argument("--test", action="store_true", help="send one test alert and exit")
     parser.add_argument("--check", action="store_true", help="print config and exit")
     parser.add_argument("--chat-id", action="store_true", help="discover your chat id")
+    parser.add_argument("--dashboard", action="store_true",
+                        help="serve only the dashboard, without polling any source")
     args = parser.parse_args()
 
     config = Config.from_env()
@@ -192,6 +255,8 @@ def main() -> int:
 
     if args.check:
         return check_config(config)
+    if args.dashboard:
+        return asyncio.run(serve_dashboard_only(config))
     if args.chat_id:
         return asyncio.run(show_chat_id(config))
     if args.test:

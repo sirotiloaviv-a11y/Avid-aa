@@ -27,6 +27,7 @@ from datetime import datetime, timezone
 
 from ..alerts import Alert
 from ..config import Config
+from ..monitoring import Runtime
 from ..notifier import Notifier
 from ..state import StateStore
 from ..telegram_api import TelegramClient, TelegramError
@@ -34,6 +35,8 @@ from ..telegram_api import TelegramClient, TelegramError
 log = logging.getLogger(__name__)
 
 ALLOWED_UPDATES = ["channel_post", "edited_channel_post", "message"]
+# Health entry for the polling connection itself, distinct from any channel.
+API_SOURCE = "Telegram Bot API"
 
 
 class TelegramChannelMonitor:
@@ -43,13 +46,19 @@ class TelegramChannelMonitor:
         client: TelegramClient,
         notifier: Notifier,
         state: StateStore,
+        runtime: Runtime | None = None,
     ):
         self._config = config
         self._client = client
         self._notifier = notifier
         self._state = state
+        self._runtime = runtime
         # Accept "@name", "name", or a numeric -100... id.
         self._wanted = {c.lstrip("@").lower() for c in config.telegram_channels}
+        if runtime:
+            runtime.source(API_SOURCE, "telegram")
+            for channel in config.telegram_channels:
+                runtime.source(channel, "telegram")
 
     async def run(self, stop: asyncio.Event) -> None:
         if not self._config.telegram_channels:
@@ -67,8 +76,12 @@ class TelegramChannelMonitor:
                     allowed_updates=ALLOWED_UPDATES,
                 )
                 backoff = 2.0
+                if self._runtime:
+                    self._runtime.source(API_SOURCE, "telegram").record_success(len(updates))
             except TelegramError as exc:
                 log.error("getUpdates failed: %s (retrying in %.0fs)", exc, backoff)
+                if self._runtime:
+                    self._runtime.source(API_SOURCE, "telegram").record_error(str(exc))
                 try:
                     await asyncio.wait_for(stop.wait(), timeout=backoff)
                 except asyncio.TimeoutError:
@@ -116,6 +129,8 @@ class TelegramChannelMonitor:
 
         username = chat.get("username")
         source = f"@{username}" if username else (chat.get("title") or str(chat.get("id")))
+        if self._runtime:
+            self._runtime.source(source, "telegram").record_success(items=1)
         url = (
             f"https://t.me/{username}/{post.get('message_id')}"
             if username and post.get("message_id")

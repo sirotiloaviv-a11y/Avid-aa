@@ -74,16 +74,21 @@ class KeywordRule:
     Args:
         phrase: The phrase in Hebrew (or any language).
         severity: Urgency assigned to a match.
-        allow_affixes: Tolerate Hebrew prefix letters and inflectional
-            suffixes. Turn this off for phrases where a loose match would
-            produce noise.
+        allow_affixes: Master switch for loose matching. Turn this off for
+            phrases where any fuzziness would produce noise.
+        allow_prefixes: Tolerate attached prefix letters on the first word.
+            Turn this off for short words where a prefix creates a different
+            word entirely — "טילים" with a מ prefix becomes "מטילים" (a verb),
+            and "אש" with a ה prefix becomes "האש" but with כ becomes "כאש".
         max_suffix: How many trailing Hebrew letters to tolerate on the final
-            word when ``allow_affixes`` is set.
+            word. Set to 0 to require the exact form. Keep it low for short
+            words: "מטח" with two tolerated letters also matches "מטחנה".
     """
 
     phrase: str
     severity: Severity = Severity.HIGH
     allow_affixes: bool = True
+    allow_prefixes: bool = True
     max_suffix: int = 3
     pattern: re.Pattern[str] = field(init=False, repr=False, compare=False)
 
@@ -96,9 +101,15 @@ class KeywordRule:
         for index, word in enumerate(words):
             escaped = re.escape(word)
             is_first, is_last = index == 0, index == len(words) - 1
-            if self.allow_affixes and is_first and self._is_hebrew(word):
+            fuzzy = self.allow_affixes and self._is_hebrew(word)
+            if fuzzy and is_last and word.endswith("ה") and len(word) > 2:
+                # Feminine nouns pluralise by replacing the final ה, which a
+                # trailing-letter window can never reach: רקטה → רקטות,
+                # אזעקה → אזעקות, דקירה → דקירות.
+                escaped = re.escape(word[:-1]) + "(?:ה|ות|ת)"
+            if fuzzy and is_first and self.allow_prefixes:
                 escaped = f"[{_PREFIX_LETTERS}]{{0,2}}" + escaped
-            if self.allow_affixes and is_last and self._is_hebrew(word):
+            if fuzzy and is_last and self.max_suffix > 0:
                 escaped += f"[{_HEBREW_LETTER}]{{0,{self.max_suffix}}}"
             parts.append(escaped)
         # Words in a phrase may be separated by any run of whitespace.
@@ -136,29 +147,75 @@ class Match:
 # Default rule set. Override entirely via the KEYWORDS env var, or edit here.
 # --------------------------------------------------------------------------
 DEFAULT_RULES: tuple[KeywordRule, ...] = (
+    # --- CRITICAL: an attack or incursion is happening -------------------
     # "צבע אדום" is an exact siren phrase — affix tolerance would only add noise.
     KeywordRule("צבע אדום", Severity.CRITICAL, allow_affixes=False),
+    KeywordRule("היכנסו למרחב המוגן", Severity.CRITICAL, allow_affixes=False),
     KeywordRule("פיגוע", Severity.CRITICAL),
     KeywordRule("אירוע ביטחוני", Severity.CRITICAL),
+    KeywordRule("אירוע ירי", Severity.CRITICAL),
+    KeywordRule("אירוע דקירה", Severity.CRITICAL),
+    KeywordRule("אירוע דריסה", Severity.CRITICAL),
+    KeywordRule("אירוע רב נפגעים", Severity.CRITICAL),
+    KeywordRule("מחבל", Severity.CRITICAL),
     KeywordRule("חדירת מחבלים", Severity.CRITICAL),
     KeywordRule("חשד לחדירה", Severity.CRITICAL),
+    KeywordRule("חדירה לשטח", Severity.CRITICAL),
+    KeywordRule("פריצת גבול", Severity.CRITICAL),
     KeywordRule("ירי לעבר", Severity.CRITICAL),
+    KeywordRule("חילופי אש", Severity.CRITICAL),
+    KeywordRule("חטיפה", Severity.CRITICAL),
+    KeywordRule("כוננות ספיגה", Severity.CRITICAL),
+
+    # --- HIGH: rockets, aircraft, casualties, explosives -----------------
+    # These cover their own plurals: אזעקות, שיגורים, רקטות.
     KeywordRule("אזעקה", Severity.HIGH),
-    KeywordRule("אזעקות", Severity.HIGH),
     KeywordRule("שיגור", Severity.HIGH),
-    KeywordRule("שיגורים", Severity.HIGH),
+    KeywordRule("רקטה", Severity.HIGH),
+    # "טילים" takes no prefix: מ + טילים = "מטילים", an unrelated verb.
+    KeywordRule("טילים", Severity.HIGH, allow_prefixes=False, max_suffix=0),
+    KeywordRule("ירי טילים", Severity.HIGH),
+    KeywordRule("טיל בליסטי", Severity.HIGH),
+    # "מטח" keeps a short suffix window: two letters would also match "מטחנה".
+    KeywordRule("מטח", Severity.HIGH, max_suffix=1),
+    KeywordRule("מרגמות", Severity.HIGH),
+    KeywordRule("פצצת מרגמה", Severity.HIGH),
+    KeywordRule("נפילות", Severity.HIGH, max_suffix=0),
     KeywordRule("כלי טיס עוין", Severity.HIGH),
+    KeywordRule("כלי טיס חשוד", Severity.HIGH),
     KeywordRule("חדירת כלי טיס", Severity.HIGH),
     KeywordRule("רחפן", Severity.HIGH),
+    KeywordRule('כטב"ם', Severity.HIGH),
     KeywordRule("פצוע", Severity.HIGH),
     KeywordRule("הרוג", Severity.HIGH),
+    KeywordRule("נפגעים", Severity.HIGH, max_suffix=0),
     KeywordRule("דקירה", Severity.HIGH),
+    KeywordRule("דריסה", Severity.HIGH),
     KeywordRule("פיצוץ", Severity.HIGH),
+    KeywordRule("פצצה", Severity.HIGH),
     KeywordRule("מטען חבלה", Severity.HIGH),
-    KeywordRule("היכנסו למרחב המוגן", Severity.CRITICAL, allow_affixes=False),
+    KeywordRule("מארב", Severity.HIGH),
+    KeywordRule("ירי צלפים", Severity.HIGH),
+    KeywordRule("נוטרל", Severity.HIGH),
+    KeywordRule("תקיפה", Severity.HIGH),
+    KeywordRule("טרור", Severity.HIGH),
+
+    # --- ELEVATED: context, response and precaution ----------------------
     KeywordRule("פיקוד העורף", Severity.ELEVATED),
     KeywordRule("כוחות הביטחון", Severity.ELEVATED),
+    KeywordRule("כוחות ההצלה", Severity.ELEVATED),
     KeywordRule("חשד לירי", Severity.ELEVATED),
+    KeywordRule("מרחב מוגן", Severity.ELEVATED),
+    KeywordRule("מקלט", Severity.ELEVATED),
+    KeywordRule('ממ"ד', Severity.ELEVATED),
+    KeywordRule("כוננות", Severity.ELEVATED),
+    KeywordRule("הסלמה", Severity.ELEVATED),
+    KeywordRule("חילוץ", Severity.ELEVATED),
+    KeywordRule("סריקות", Severity.ELEVATED, max_suffix=0),
+    KeywordRule("זירת האירוע", Severity.ELEVATED),
+    KeywordRule("אירוע חריג", Severity.ELEVATED),
+    KeywordRule("עוצר", Severity.ELEVATED),
+    KeywordRule('מד"א', Severity.ELEVATED),
 )
 
 

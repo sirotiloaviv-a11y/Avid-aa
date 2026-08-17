@@ -81,6 +81,13 @@ class Config:
     cameras_enabled: bool = False
     camera_snapshot_on_severity: str = "CRITICAL"
 
+    # --- Dashboard (see dashboard.py) -----------------------------------
+    dashboard_enabled: bool = True
+    dashboard_host: str = "127.0.0.1"
+    dashboard_port: int = 8080
+    dashboard_token: str = ""
+    alert_history_size: int = 100
+
     @classmethod
     def from_env(cls, dotenv: Path | None = None) -> "Config":
         _load_dotenv(dotenv or BASE_DIR.parent / ".env")
@@ -112,7 +119,17 @@ class Config:
             log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
             cameras_enabled=_env_bool("CAMERAS_ENABLED", False),
             camera_snapshot_on_severity=os.getenv("CAMERA_SNAPSHOT_ON_SEVERITY", "CRITICAL").upper(),
+            dashboard_enabled=_env_bool("DASHBOARD_ENABLED", True),
+            dashboard_host=os.getenv("DASHBOARD_HOST", "127.0.0.1").strip(),
+            dashboard_port=_env_int("DASHBOARD_PORT", 8080),
+            dashboard_token=os.getenv("DASHBOARD_TOKEN", "").strip(),
+            alert_history_size=_env_int("ALERT_HISTORY_SIZE", 100),
         )
+
+    @property
+    def alert_history_path(self) -> Path:
+        """Alert history lives beside the dedupe state."""
+        return self.state_path.parent / "alerts.json"
 
     def validate(self) -> list[str]:
         """Return a list of fatal configuration problems (empty means OK)."""
@@ -125,4 +142,14 @@ class Config:
             problems.append("No sources configured (RSS_FEEDS and TELEGRAM_CHANNELS are both empty).")
         if self.rss_poll_seconds < 15:
             problems.append("RSS_POLL_SECONDS below 15 is abusive to news sites; raise it.")
+        if (
+            self.dashboard_enabled
+            and self.dashboard_host not in {"127.0.0.1", "localhost", "::1"}
+            and not self.dashboard_token
+        ):
+            problems.append(
+                f"DASHBOARD_HOST is {self.dashboard_host} but DASHBOARD_TOKEN is empty — "
+                "that publishes your alert history to anyone who can reach the port. "
+                "Set a token, or bind to 127.0.0.1."
+            )
         return problems

@@ -23,7 +23,7 @@ python -m security_alert_system.main --chat-id     # prints your chat id
 
 python -m security_alert_system.main --check       # validate config
 python -m security_alert_system.main --test        # send a test alert
-python -m security_alert_system.main               # run
+python -m security_alert_system.main               # run (monitor + dashboard)
 ```
 
 Run every command from the **repository root** (the directory containing
@@ -37,7 +37,8 @@ Run every command from the **repository root** (the directory containing
   RSS feeds ──┐
               ├─► KeywordMatcher ─► dedupe (StateStore) ─► Notifier ─► your Telegram chat
 Telegram ch. ─┘                                              │
-                                                             └─► CameraRegistry (placeholder)
+                                                             ├─► CameraRegistry (placeholder)
+                                                             └─► Runtime ─► status dashboard
 ```
 
 | File | Role |
@@ -51,6 +52,8 @@ Telegram ch. ─┘                                              │
 | `telegram_api.py` | Bot API client: retries, rate limits |
 | `notifier.py` | delivery, throttling, snapshot attachment |
 | `state.py` | dedupe + Telegram offset, atomic writes |
+| `monitoring.py` | alert history + per-source health, for the dashboard |
+| `dashboard.py` | dependency-free HTTP status page |
 | `cameras.py` | **RTSP placeholder layer** — read its docstring |
 
 ---
@@ -69,6 +72,15 @@ A plain `in` check fails on Hebrew news text. The matcher handles:
 Each rule carries a severity (`INFO` / `ELEVATED` / `HIGH` / `CRITICAL`); an
 alert takes the highest severity among its matches.
 
+The default set is 60 phrases: 17 `CRITICAL`, 28 `HIGH`, 15 `ELEVATED`.
+
+A few rules are tuned by hand to avoid collisions, and the reason is in a
+comment beside each: `טילים` takes no attached prefix (otherwise `מטילים`, an
+unrelated verb, matches), and `מטח` allows only one trailing letter (otherwise
+`מטחנה` matches). Feminine nouns are handled in the compiler rather than
+duplicated in the list — `רקטה` covers `רקטות`, because the final ה is
+*replaced*, not appended, and no trailing-letter window can reach it.
+
 Override the whole default set via `KEYWORDS` in `.env`:
 
 ```
@@ -77,6 +89,44 @@ KEYWORDS=פיגוע:CRITICAL,"צבע אדום":CRITICAL,אירוע ביטחונ�
 
 Quoting a phrase disables prefix/suffix tolerance (exact match only) — useful
 for fixed phrases like `צבע אדום` where fuzzy matching just adds noise.
+
+---
+
+## Status dashboard
+
+Runs alongside the monitor and shows what is being watched, which sources are
+healthy, and every alert that has fired.
+
+```
+GET /             the dashboard (Hebrew, RTL, auto-refreshes every 10s)
+GET /api/status   the same data as JSON
+GET /healthz      "ok" — for a container healthcheck, never requires the token
+```
+
+```bash
+python -m security_alert_system.main             # monitor + dashboard
+python -m security_alert_system.main --dashboard # dashboard only, no polling
+```
+
+It is dependency-free — `asyncio.start_server` plus just enough HTTP/1.1 — so
+the service doesn't carry a web framework it would only use for one page. There
+are no write routes.
+
+**Access.** It binds to `127.0.0.1` by default, which inside a cloud container
+means "reachable only from inside the container". Use `docker exec`, an SSH
+tunnel, or your platform's port-forward:
+
+```bash
+ssh -L 8080:127.0.0.1:8080 you@host      # then open http://localhost:8080
+```
+
+Setting `DASHBOARD_HOST=0.0.0.0` without `DASHBOARD_TOKEN` is **rejected at
+startup** — that combination publishes your alert history to anyone who can
+reach the port. With a token set, pass it as `?token=…` or
+`Authorization: Bearer …`.
+
+Alert history persists to `state/alerts.json` (bounded by `ALERT_HISTORY_SIZE`),
+so a restart doesn't wipe the visible record.
 
 ---
 
@@ -179,7 +229,8 @@ Use the official app for actual sirens.
 python -m unittest discover -s security_alert_system/tests -t .
 ```
 
-28 tests, no network and no bot token required — the Telegram client is stubbed.
-Covers Hebrew normalisation and affix matching, false-positive rejection,
-feed→alert flow, dedupe across restarts, HTML escaping, and the camera
-severity gate.
+64 tests, no network and no bot token required — the Telegram client is stubbed.
+Covers Hebrew normalisation, affix and feminine-plural matching, the tuned
+false-positive guards, feed→alert flow, dedupe across restarts, HTML escaping,
+the camera severity gate, source-health transitions, history persistence, and
+the dashboard's routes and token auth (over a real socket on an ephemeral port).
