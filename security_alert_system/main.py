@@ -65,6 +65,21 @@ async def run_monitor(config: Config) -> int:
     for feed in config.rss_feeds:
         runtime.source(feed, "rss")
 
+    assistant = None
+    if config.assistant_enabled:
+        # Imported lazily so the anthropic SDK is only a dependency for users
+        # who turn the assistant on.
+        from .assistant import SecurityAssistant
+
+        assistant = SecurityAssistant(config, runtime)
+        log.info(
+            "Assistant enabled: %s on %s (effort %s), briefing at %s and above.",
+            config.assistant_name,
+            config.assistant_model,
+            config.assistant_effort,
+            config.assistant_brief_on_severity,
+        )
+
     stop = asyncio.Event()
     install_signal_handlers(stop)
 
@@ -76,7 +91,13 @@ async def run_monitor(config: Config) -> int:
             return 1
         log.info("Connected as @%s (%s).", me.get("username"), me.get("id"))
 
-        notifier = Notifier(client, config.alert_chat_id, cameras, threshold, runtime)
+        brief_threshold = getattr(
+            Severity, config.assistant_brief_on_severity, Severity.CRITICAL
+        )
+        notifier = Notifier(
+            client, config.alert_chat_id, cameras, threshold, runtime,
+            assistant=assistant, brief_threshold=brief_threshold,
+        )
 
         log.info("Watching %d RSS feed(s): %s", len(config.rss_feeds),
                  ", ".join(config.rss_feeds))
@@ -95,7 +116,9 @@ async def run_monitor(config: Config) -> int:
         )
 
         rss = RSSMonitor(config, notifier, state, runtime)
-        telegram = TelegramChannelMonitor(config, client, notifier, state, runtime)
+        telegram = TelegramChannelMonitor(
+            config, client, notifier, state, runtime, assistant=assistant
+        )
 
         tasks = [
             asyncio.create_task(rss.run(stop), name="rss"),
@@ -231,6 +254,12 @@ def check_config(config: Config) -> int:
               f"  (token {'set' if config.dashboard_token else 'not set'})")
     else:
         print("Dashboard: disabled")
+    if config.assistant_enabled:
+        print(f"Assistant: {config.assistant_name} on {config.assistant_model} "
+              f"(effort {config.assistant_effort}, briefs at "
+              f"{config.assistant_brief_on_severity}+)")
+    else:
+        print("Assistant: disabled")
     print(CameraRegistry.from_env(BASE_DIR).describe())
     if problems:
         print("\nProblems:")

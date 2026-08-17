@@ -54,6 +54,7 @@ Telegram ch. ─┘                                              │
 | `state.py` | dedupe + Telegram offset, atomic writes |
 | `monitoring.py` | alert history + per-source health, for the dashboard |
 | `dashboard.py` | dependency-free HTTP status page |
+| `assistant.py` | conversational AI layer (Claude + tools) |
 | `cameras.py` | **RTSP placeholder layer** — read its docstring |
 
 ---
@@ -89,6 +90,51 @@ KEYWORDS=פיגוע:CRITICAL,"צבע אדום":CRITICAL,אירוע ביטחונ�
 
 Quoting a phrase disables prefix/suffix tolerance (exact match only) — useful
 for fixed phrases like `צבע אדום` where fuzzy matching just adds noise.
+
+---
+
+## AI assistant
+
+A conversational layer over the monitor — message the bot in your private chat
+and it answers, in Hebrew, about live system state. Named `קארן` by default
+(`ASSISTANT_NAME`), after the Spider-Man suit AI.
+
+```
+you:   מה המצב?
+קארן:  שקט בשעתיים האחרונות. חמישה מקורות תקינים, ישראל היום מחזיר 503 כבר 40 דקות.
+
+you:   היה משהו באזור הצפון היום?
+קארן:  שתי התראות: אזעקות ב-14:20 ופיקוד העורף ב-14:35, שתיהן מ-ynet.
+```
+
+**It reads state through tools, not from the prompt** — `get_status`,
+`recent_alerts`, `search_alerts`, `list_keywords`, `camera_status`. That is the
+design point, not an implementation detail: every factual claim it makes comes
+from a tool result on the current run, so it reports what the system actually
+saw rather than what sounds plausible. The tools return "nothing found" as a
+sentence rather than empty context, so the model has something concrete to
+report instead of filling the silence.
+
+**It answers one chat only.** Private messages are routed to it only from
+`TELEGRAM_ALERT_CHAT_ID`; anything else is logged and dropped. Without that
+check anyone who finds the bot could hold a conversation on your API budget and
+read your alert history back through the tools.
+
+**Proactive briefs.** After an alert at `ASSISTANT_BRIEF_ON_SEVERITY` or above,
+it adds one line of context ("third tonight from the same area") as a *separate*
+message — the raw alert always lands first and unmodified, and a slow or failed
+model call can never delay or replace it.
+
+Commands: `/start` for help, `/reset` to clear the conversation. Both are
+handled locally without calling the model.
+
+```bash
+ASSISTANT_ENABLED=true
+ANTHROPIC_API_KEY=sk-ant-...
+```
+
+The `anthropic` import is lazy, so the monitor runs without the package
+installed as long as the assistant is off.
 
 ---
 
@@ -229,8 +275,10 @@ Use the official app for actual sirens.
 python -m unittest discover -s security_alert_system/tests -t .
 ```
 
-64 tests, no network and no bot token required — the Telegram client is stubbed.
+93 tests, no network, no bot token and no API key required — the Telegram and
+Anthropic clients are both stubbed.
 Covers Hebrew normalisation, affix and feminine-plural matching, the tuned
 false-positive guards, feed→alert flow, dedupe across restarts, HTML escaping,
-the camera severity gate, source-health transitions, history persistence, and
-the dashboard's routes and token auth (over a real socket on an ephemeral port).
+the camera severity gate, source-health transitions, history persistence, the
+dashboard's routes and token auth (over a real socket on an ephemeral port), and
+the assistant's tools, history bounds, failure paths, and access check.

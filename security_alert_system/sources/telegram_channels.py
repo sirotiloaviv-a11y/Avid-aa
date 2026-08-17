@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 
 from ..alerts import Alert
 from ..config import Config
@@ -31,6 +32,9 @@ from ..monitoring import Runtime
 from ..notifier import Notifier
 from ..state import StateStore
 from ..telegram_api import TelegramClient, TelegramError
+
+if TYPE_CHECKING:  # avoids importing the anthropic SDK unless the assistant is used
+    from ..assistant import SecurityAssistant
 
 log = logging.getLogger(__name__)
 
@@ -47,12 +51,14 @@ class TelegramChannelMonitor:
         notifier: Notifier,
         state: StateStore,
         runtime: Runtime | None = None,
+        assistant: "SecurityAssistant | None" = None,
     ):
         self._config = config
         self._client = client
         self._notifier = notifier
         self._state = state
         self._runtime = runtime
+        self._assistant = assistant
         # Accept "@name", "name", or a numeric -100... id.
         self._wanted = {c.lstrip("@").lower() for c in config.telegram_channels}
         if runtime:
@@ -111,10 +117,16 @@ class TelegramChannelMonitor:
             return
 
         chat = post.get("chat", {})
-        if not self._is_watched(chat):
+        text = post.get("text") or post.get("caption") or ""
+
+        # A private message from the owner is a question for the assistant,
+        # not a channel post to filter for keywords.
+        if chat.get("type") == "private":
+            await self._handle_private_message(chat, text)
             return
 
-        text = post.get("text") or post.get("caption") or ""
+        if not self._is_watched(chat):
+            return
         if not text.strip():
             return
 
@@ -148,6 +160,43 @@ class TelegramChannelMonitor:
             dedupe_key=key,
         )
         await self._notifier.send_alert(alert)
+
+    async def _handle_private_message(self, chat: dict, text: str) -> None:
+        """Route a DM to the assistant — but only from the configured chat.
+
+        Anyone can find a bot and message it. Without this check a stranger
+        could hold a conversation on the owner's API budget, and read back the
+        alert history through the assistant's tools.
+        """
+        if str(chat.get("id")) != str(self._config.alert_chat_id):
+            log.warning(
+                "Ignoring private message from unauthorised chat %s.", chat.get("id")
+            )
+            return
+        if not self._assistant:
+            return
+
+        text = text.strip()
+        if not text:
+            return
+        if text in {"/start", "/help"}:
+            await self._notifier.send_notice(
+                f"אני {self._config.assistant_name}. תשאל אותי על מצב המערכת, "
+                "מה נקלט לאחרונה, או על מקור מסוים. /reset מנקה את השיחה."
+            )
+            return
+        if text == "/reset":
+            self._assistant.reset()
+            await self._notifier.send_notice("השיחה אופסה.")
+            return
+
+        log.info("Assistant question: %s", text[:80])
+        try:
+            answer = await self._assistant.reply(text)
+        except Exception:  # noqa: BLE001 - the assistant must never kill the loop
+            log.exception("Assistant failed to answer.")
+            return
+        await self._notifier.send_plain(answer)
 
     def _is_watched(self, chat: dict) -> bool:
         if not self._wanted:

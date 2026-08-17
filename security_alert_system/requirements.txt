@@ -1,2 +1,6 @@
 httpx>=0.27,<1.0
 feedparser>=6.0.11,<7.0
+
+# Only needed when ASSISTANT_ENABLED=true. The import is lazy, so the monitor
+# runs without it installed.
+anthropic>=0.122,<1.0

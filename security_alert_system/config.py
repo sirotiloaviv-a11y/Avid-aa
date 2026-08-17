@@ -81,6 +81,17 @@ class Config:
     cameras_enabled: bool = False
     camera_snapshot_on_severity: str = "CRITICAL"
 
+    # --- AI assistant (see assistant.py) --------------------------------
+    anthropic_api_key: str = ""
+    assistant_enabled: bool = False
+    assistant_model: str = "claude-opus-5"
+    assistant_effort: str = "medium"
+    assistant_name: str = "קארן"
+    assistant_owner_name: str = "אביב"
+    assistant_history_turns: int = 12
+    # Add a line of context to alerts at or above this severity.
+    assistant_brief_on_severity: str = "CRITICAL"
+
     # --- Dashboard (see dashboard.py) -----------------------------------
     dashboard_enabled: bool = True
     dashboard_host: str = "127.0.0.1"
@@ -119,6 +130,16 @@ class Config:
             log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
             cameras_enabled=_env_bool("CAMERAS_ENABLED", False),
             camera_snapshot_on_severity=os.getenv("CAMERA_SNAPSHOT_ON_SEVERITY", "CRITICAL").upper(),
+            anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", "").strip(),
+            assistant_enabled=_env_bool("ASSISTANT_ENABLED", False),
+            assistant_model=os.getenv("ASSISTANT_MODEL", "claude-opus-5").strip(),
+            assistant_effort=os.getenv("ASSISTANT_EFFORT", "medium").strip().lower(),
+            assistant_name=os.getenv("ASSISTANT_NAME", "קארן").strip(),
+            assistant_owner_name=os.getenv("ASSISTANT_OWNER_NAME", "אביב").strip(),
+            assistant_history_turns=_env_int("ASSISTANT_HISTORY_TURNS", 12),
+            assistant_brief_on_severity=os.getenv(
+                "ASSISTANT_BRIEF_ON_SEVERITY", "CRITICAL"
+            ).upper(),
             dashboard_enabled=_env_bool("DASHBOARD_ENABLED", True),
             dashboard_host=os.getenv("DASHBOARD_HOST", "127.0.0.1").strip(),
             dashboard_port=_env_int("DASHBOARD_PORT", 8080),
@@ -142,6 +163,17 @@ class Config:
             problems.append("No sources configured (RSS_FEEDS and TELEGRAM_CHANNELS are both empty).")
         if self.rss_poll_seconds < 15:
             problems.append("RSS_POLL_SECONDS below 15 is abusive to news sites; raise it.")
+        if self.assistant_enabled and not self.anthropic_api_key:
+            problems.append(
+                "ASSISTANT_ENABLED is on but ANTHROPIC_API_KEY is not set."
+            )
+        if self.assistant_enabled and self.assistant_effort not in {
+            "low", "medium", "high", "xhigh", "max",
+        }:
+            problems.append(
+                f"ASSISTANT_EFFORT is '{self.assistant_effort}' — must be one of "
+                "low, medium, high, xhigh, max."
+            )
         if (
             self.dashboard_enabled
             and self.dashboard_host not in {"127.0.0.1", "localhost", "::1"}
