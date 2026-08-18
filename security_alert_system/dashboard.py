@@ -28,14 +28,18 @@ import hmac
 import json
 import logging
 from datetime import datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qs, urlsplit
 
 from .monitoring import Runtime
 
+if TYPE_CHECKING:
+    from .ingest import IngestPipeline
+
 log = logging.getLogger(__name__)
 
 MAX_REQUEST_BYTES = 16 * 1024
+MAX_INGEST_BYTES = 256 * 1024
 READ_TIMEOUT_SECONDS = 10
 
 
@@ -47,6 +51,8 @@ class DashboardServer:
         port: int = 8080,
         token: str = "",
         context: dict[str, Any] | None = None,
+        ingest: "IngestPipeline | None" = None,
+        ingest_token: str = "",
     ):
         self._runtime = runtime
         self._host = host
@@ -54,6 +60,11 @@ class DashboardServer:
         self._token = token
         # Static facts about the running config (keywords, feeds, cameras).
         self._context = context or {}
+        self._ingest = ingest
+        # Deliberately a separate secret from the dashboard token: a read
+        # token handed to someone to look at the page must not also let
+        # them inject alerts.
+        self._ingest_token = ingest_token
 
     async def run(self, stop: asyncio.Event) -> None:
         try:
@@ -95,6 +106,9 @@ class DashboardServer:
             path = split.path.rstrip("/") or "/"
             query = parse_qs(split.query)
 
+            if method == "POST":
+                await self._handle_ingest(reader, writer, headers, path)
+                return
             if method not in {"GET", "HEAD"}:
                 await self._respond(writer, 405, "text/plain; charset=utf-8", b"method not allowed")
                 return
@@ -130,6 +144,90 @@ class DashboardServer:
             except (ConnectionError, RuntimeError):
                 pass
 
+    async def _handle_ingest(
+        self,
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+        headers: dict[str, str],
+        path: str,
+    ) -> None:
+        """The one write route. Auth here is unconditional — unlike the read
+        routes, there is no "no token configured" path that falls open."""
+        if path != "/ingest":
+            await self._respond(writer, 404, "text/plain; charset=utf-8", b"not found")
+            return
+        if self._ingest is None or not self._ingest_token:
+            await self._respond(
+                writer, 503, "application/json; charset=utf-8",
+                b'{"error":"ingest is not configured"}',
+            )
+            return
+
+        supplied = ""
+        auth = headers.get("authorization", "")
+        if auth.lower().startswith("bearer "):
+            supplied = auth[7:].strip()
+        if not hmac.compare_digest(supplied, self._ingest_token):
+            await self._respond(
+                writer, 401, "application/json; charset=utf-8",
+                b'{"error":"unauthorised"}',
+            )
+            return
+
+        try:
+            length = int(headers.get("content-length", "0"))
+        except ValueError:
+            length = 0
+        if length <= 0 or length > MAX_INGEST_BYTES:
+            await self._respond(
+                writer, 413, "application/json; charset=utf-8",
+                b'{"error":"missing or oversized body"}',
+            )
+            return
+
+        try:
+            raw = await asyncio.wait_for(
+                reader.readexactly(length), timeout=READ_TIMEOUT_SECONDS
+            )
+            payload = json.loads(raw.decode("utf-8"))
+        except (asyncio.IncompleteReadError, asyncio.TimeoutError, ValueError,
+                UnicodeDecodeError):
+            await self._respond(
+                writer, 400, "application/json; charset=utf-8",
+                b'{"error":"body is not valid JSON"}',
+            )
+            return
+
+        if not isinstance(payload, dict):
+            await self._respond(
+                writer, 400, "application/json; charset=utf-8",
+                b'{"error":"body must be a JSON object"}',
+            )
+            return
+
+        try:
+            result = await self._ingest.submit(
+                source=str(payload.get("source", "")),
+                text=str(payload.get("text", "")),
+                url=payload.get("url") or None,
+                kind=str(payload.get("kind") or "external"),
+                external_id=payload.get("id") or None,
+                timestamp=_as_float(payload.get("timestamp")),
+            )
+        except Exception:  # noqa: BLE001 - a bad push must not kill the server
+            log.exception("Ingest failed.")
+            await self._respond(
+                writer, 500, "application/json; charset=utf-8",
+                b'{"error":"ingest failed"}',
+            )
+            return
+
+        body = json.dumps(result.to_dict(), ensure_ascii=False).encode("utf-8")
+        await self._respond(
+            writer, 200 if result.accepted else 400,
+            "application/json; charset=utf-8", body,
+        )
+
     async def _read_headers(self, reader: asyncio.StreamReader) -> dict[str, str]:
         headers: dict[str, str] = {}
         total = 0
@@ -162,7 +260,9 @@ class DashboardServer:
         writer: asyncio.StreamWriter, status: int, content_type: str, body: bytes
     ) -> None:
         reason = {200: "OK", 400: "Bad Request", 401: "Unauthorized",
-                  404: "Not Found", 405: "Method Not Allowed"}.get(status, "OK")
+                  404: "Not Found", 405: "Method Not Allowed",
+                  413: "Payload Too Large", 500: "Internal Server Error",
+                  503: "Service Unavailable"}.get(status, "OK")
         stamp = datetime.now(timezone.utc).strftime("%a, %d %b %Y %H:%M:%S GMT")
         head = (
             f"HTTP/1.1 {status} {reason}\r\n"
@@ -176,6 +276,13 @@ class DashboardServer:
         ).encode("latin-1")
         writer.write(head + body)
         await writer.drain()
+
+
+def _as_float(value: Any) -> float | None:
+    try:
+        return float(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
 
 
 def render_page(token_query: str = "") -> str:

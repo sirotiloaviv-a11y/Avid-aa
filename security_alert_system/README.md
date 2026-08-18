@@ -56,6 +56,7 @@ Telegram ch. ─┘                                              │
 | `dashboard.py` | dependency-free HTTP status page |
 | `assistant.py` | conversational AI layer (Claude + tools) |
 | `voice.py` | speech in / speech out, swappable providers |
+| `ingest.py` | the one authenticated write route for outside sources |
 | `cameras.py` | **RTSP placeholder layer** — read its docstring |
 
 ---
@@ -136,6 +137,54 @@ ANTHROPIC_API_KEY=sk-ant-...
 
 The `anthropic` import is lazy, so the monitor runs without the package
 installed as long as the assistant is off.
+
+---
+
+## Sources: what it reads, and how to add more
+
+| Source | How | Status |
+|---|---|---|
+| News sites | RSS, conditional GET every 60s | built in |
+| Telegram channels | `getUpdates`, bot must be admin | built in |
+| Telegram groups | same, **privacy mode must be off** — see below | built in |
+| WhatsApp groups | bridge → ingest route | `bridges/whatsapp_bridge.md` |
+| Sites with no RSS | scraper → ingest route | write a bridge |
+| Cameras | agent → ingest route, or the connectors in `cameras.py` | placeholder |
+
+**Telegram groups need privacy mode off.** A bot added to a group sees nothing
+by default — Telegram hides every message that is not a command or a reply to
+the bot, so the monitor sits there matching nothing and looking broken. In
+BotFather: `/setprivacy` → pick the bot → **Disable**, then **remove and re-add
+the bot to the group** (the setting applies when it joins). Group alerts carry
+the sender name as well as the group, because in a conversation "who said it"
+is part of judging a report.
+
+**Everything else pushes in through one route.** `POST /ingest` with a bearer
+token runs the same keyword matcher, the same dedupe, the same severity ladder,
+and produces the same alert with the same assistant context and dashboard row.
+A new source is a new bridge script, not a new branch inside the monitor.
+
+```bash
+curl -s -X POST http://127.0.0.1:8080/ingest \
+  -H "Authorization: Bearer $INGEST_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"source":"וואטסאפ · שכונה","text":"שמעתי פיצוץ ליד הצומת","kind":"whatsapp"}'
+```
+
+Bridges run as separate processes on purpose — they are the fragile and risky
+parts (a WhatsApp reader risks a ban, a scraper breaks on markup changes, a
+home agent reboots), and out of process any of them can die without touching
+the monitor. Contract and examples: `bridges/README.md`.
+
+The ingest route is the **only** write path in the system, so its auth is
+unconditional: no token configured means the route returns 503, never open. Its
+token must differ from the dashboard's, and startup refuses if it does not.
+
+**WhatsApp specifically has no legitimate API for reading groups** — not on any
+tier. The unofficial path runs as a linked device on your own account and risks
+a permanent ban on your number. I did not put that code in the repo; the
+tradeoff and a working sketch are in `bridges/whatsapp_bridge.md` so the choice
+is yours to make explicitly.
 
 ---
 
@@ -339,11 +388,12 @@ Use the official app for actual sirens.
 python -m unittest discover -s security_alert_system/tests -t .
 ```
 
-113 tests, no network and no keys of any kind required — the Telegram,
+135 tests, no network and no keys of any kind required — the Telegram,
 Anthropic and speech clients are all stubbed.
 Covers Hebrew normalisation, affix and feminine-plural matching, the tuned
 false-positive guards, feed→alert flow, dedupe across restarts, HTML escaping,
 the camera severity gate, source-health transitions, history persistence, the
 dashboard's routes and token auth (over a real socket on an ephemeral port), and
 the assistant's tools, history bounds, failure paths and access check, and
-the voice round trip including every fallback path.
+the voice round trip including every fallback path, and the ingest
+route's auth, dedupe, rate limiting and malformed-input handling.

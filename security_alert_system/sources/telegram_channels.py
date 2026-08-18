@@ -12,6 +12,17 @@ So:
 
 * Channels you own or admin  → add the bot as an admin, list it in
   ``TELEGRAM_CHANNELS``, and this module works directly.
+GROUPS NEED PRIVACY MODE OFF
+----------------------------
+A bot added to a **group** sees nothing by default. Telegram's privacy mode
+hides every message that is not a command or a reply to the bot, so the monitor
+sits there matching zero keywords and looking broken. Fix it once, in BotFather:
+
+    /setprivacy → pick the bot → Disable
+
+then **remove and re-add the bot to the group** — the setting is applied when
+the bot joins, so an existing membership keeps the old behaviour.
+
 * Public channels you do not control → mirror them into RSS and let the RSS
   monitor handle it. Public channels have a web preview at
   ``https://t.me/s/<channel>``, and bridges such as RSSHub expose that as a
@@ -146,6 +157,13 @@ class TelegramChannelMonitor:
 
         username = chat.get("username")
         source = f"@{username}" if username else (chat.get("title") or str(chat.get("id")))
+        if chat.get("type") in {"group", "supergroup"}:
+            # In a group the author matters — "who said it" is part of judging
+            # a report. Channels are broadcasts, so the channel name is enough.
+            sender = post.get("from") or {}
+            who = sender.get("username") or sender.get("first_name")
+            if who:
+                source = f"{source} · {who}"
         if self._runtime:
             self._runtime.source(source, "telegram").record_success(items=1)
         url = (
@@ -261,10 +279,15 @@ class TelegramChannelMonitor:
         if want_text or not self._speaker:
             await self._notifier.send_plain(answer)
 
+    # Channels broadcast; groups are conversations. Both are worth watching,
+    # and both arrive here — but see the privacy-mode note in the module
+    # docstring: in a group the bot sees nothing until you disable it.
+    WATCHABLE_CHAT_TYPES = {"channel", "group", "supergroup"}
+
     def _is_watched(self, chat: dict) -> bool:
         if not self._wanted:
-            # No allow-list: accept channel posts, ignore DMs to the bot.
-            return chat.get("type") == "channel"
+            # No allow-list: accept broadcast and group traffic, ignore DMs.
+            return chat.get("type") in self.WATCHABLE_CHAT_TYPES
         username = (chat.get("username") or "").lower()
         chat_id = str(chat.get("id", ""))
         title = (chat.get("title") or "").lower()

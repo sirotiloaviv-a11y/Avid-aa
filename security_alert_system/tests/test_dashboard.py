@@ -196,14 +196,29 @@ class TestDashboardRoutes(DashboardTestCase):
         status, _, _ = await self.request("/nope")
         self.assertEqual(status, 404)
 
-    async def test_post_is_rejected(self):
+    async def _post(self, path: str, body: bytes = b"{}", auth: str = "") -> bytes:
         reader, writer = await asyncio.open_connection("127.0.0.1", self.port)
-        writer.write(b"POST / HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        head = (
+            f"POST {path} HTTP/1.1\r\nHost: localhost\r\n"
+            f"Content-Length: {len(body)}\r\n{auth}\r\n"
+        ).encode()
+        writer.write(head + body)
         await writer.drain()
         raw = await asyncio.wait_for(reader.read(-1), timeout=5)
         writer.close()
         await writer.wait_closed()
-        self.assertIn(b"405", raw.split(b"\r\n")[0])
+        return raw
+
+    async def test_post_to_a_read_path_is_not_found(self):
+        # POST is a valid method now, but only on /ingest.
+        raw = await self._post("/")
+        self.assertIn(b"404", raw.split(b"\r\n")[0])
+
+    async def test_ingest_is_unavailable_when_not_configured(self):
+        # No pipeline and no token: the route must not fall open, and must not
+        # pretend to accept either.
+        raw = await self._post("/ingest", b'{"source":"x","text":"y"}')
+        self.assertIn(b"503", raw.split(b"\r\n")[0])
 
     async def test_garbage_request_does_not_kill_server(self):
         reader, writer = await asyncio.open_connection("127.0.0.1", self.port)

@@ -103,6 +103,10 @@ class Config:
     # match = answer in the medium the question arrived in.
     voice_reply_mode: str = "match"         # match | voice | text | both
 
+    # --- Ingest (see ingest.py) -----------------------------------------
+    ingest_enabled: bool = False
+    ingest_token: str = ""
+
     # --- Dashboard (see dashboard.py) -----------------------------------
     dashboard_enabled: bool = True
     dashboard_host: str = "127.0.0.1"
@@ -159,6 +163,8 @@ class Config:
             voice_name=os.getenv("VOICE_NAME", "shimmer").strip(),
             voice_whisper_model=os.getenv("VOICE_WHISPER_MODEL", "small").strip(),
             voice_reply_mode=os.getenv("VOICE_REPLY_MODE", "match").strip().lower(),
+            ingest_enabled=_env_bool("INGEST_ENABLED", False),
+            ingest_token=os.getenv("INGEST_TOKEN", "").strip(),
             dashboard_enabled=_env_bool("DASHBOARD_ENABLED", True),
             dashboard_host=os.getenv("DASHBOARD_HOST", "127.0.0.1").strip(),
             dashboard_port=_env_int("DASHBOARD_PORT", 8080),
@@ -208,6 +214,22 @@ class Config:
             problems.append(
                 f"VOICE_REPLY_MODE is '{self.voice_reply_mode}' — must be "
                 "match, voice, text or both."
+            )
+        if self.ingest_enabled and not self.ingest_token:
+            problems.append(
+                "INGEST_ENABLED is on but INGEST_TOKEN is not set — the "
+                "ingest route is the only way to write into this system and "
+                "is never left open."
+            )
+        if self.ingest_enabled and self.ingest_token == self.dashboard_token:
+            problems.append(
+                "INGEST_TOKEN must differ from DASHBOARD_TOKEN — a read "
+                "token should not also grant the ability to inject alerts."
+            )
+        if self.ingest_enabled and not self.dashboard_enabled:
+            problems.append(
+                "INGEST_ENABLED requires DASHBOARD_ENABLED — the ingest "
+                "route is served by the same HTTP server."
             )
         if (
             self.dashboard_enabled

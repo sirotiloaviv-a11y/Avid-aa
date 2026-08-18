@@ -139,11 +139,22 @@ async def run_monitor(config: Config) -> int:
         ]
 
         if config.dashboard_enabled:
+            pipeline = None
+            if config.ingest_enabled:
+                from .ingest import IngestPipeline
+
+                pipeline = IngestPipeline(config, notifier, state, runtime)
+                log.info(
+                    "Ingest enabled at POST http://%s:%d/ingest",
+                    config.dashboard_host, config.dashboard_port,
+                )
             server = DashboardServer(
                 runtime,
                 config.dashboard_host,
                 config.dashboard_port,
                 config.dashboard_token,
+                ingest=pipeline,
+                ingest_token=config.ingest_token,
                 context={
                     "keyword_count": len(config.matcher.rules),
                     "feed_count": len(config.rss_feeds),
@@ -277,6 +288,11 @@ def check_config(config: Config) -> int:
         print(f"Voice: {config.voice_provider} (reply mode {config.voice_reply_mode})")
     else:
         print("Voice: disabled")
+    if config.ingest_enabled:
+        print(f"Ingest: POST http://{config.dashboard_host}:{config.dashboard_port}/ingest"
+              f"  (token {'set' if config.ingest_token else 'NOT SET'})")
+    else:
+        print("Ingest: disabled")
     print(CameraRegistry.from_env(BASE_DIR).describe())
     if problems:
         print("\nProblems:")
