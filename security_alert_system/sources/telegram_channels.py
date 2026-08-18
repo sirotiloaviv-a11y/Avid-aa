@@ -35,6 +35,7 @@ from ..telegram_api import TelegramClient, TelegramError
 
 if TYPE_CHECKING:  # avoids importing the anthropic SDK unless the assistant is used
     from ..assistant import SecurityAssistant
+    from ..voice import Speaker, Transcriber
 
 log = logging.getLogger(__name__)
 
@@ -52,6 +53,8 @@ class TelegramChannelMonitor:
         state: StateStore,
         runtime: Runtime | None = None,
         assistant: "SecurityAssistant | None" = None,
+        transcriber: "Transcriber | None" = None,
+        speaker: "Speaker | None" = None,
     ):
         self._config = config
         self._client = client
@@ -59,6 +62,8 @@ class TelegramChannelMonitor:
         self._state = state
         self._runtime = runtime
         self._assistant = assistant
+        self._transcriber = transcriber
+        self._speaker = speaker
         # Accept "@name", "name", or a numeric -100... id.
         self._wanted = {c.lstrip("@").lower() for c in config.telegram_channels}
         if runtime:
@@ -122,7 +127,7 @@ class TelegramChannelMonitor:
         # A private message from the owner is a question for the assistant,
         # not a channel post to filter for keywords.
         if chat.get("type") == "private":
-            await self._handle_private_message(chat, text)
+            await self._handle_private_message(chat, post)
             return
 
         if not self._is_watched(chat):
@@ -161,7 +166,7 @@ class TelegramChannelMonitor:
         )
         await self._notifier.send_alert(alert)
 
-    async def _handle_private_message(self, chat: dict, text: str) -> None:
+    async def _handle_private_message(self, chat: dict, post: dict) -> None:
         """Route a DM to the assistant — but only from the configured chat.
 
         Anyone can find a bot and message it. Without this check a stranger
@@ -176,7 +181,16 @@ class TelegramChannelMonitor:
         if not self._assistant:
             return
 
-        text = text.strip()
+        # A voice note becomes text before anything else looks at it, so the
+        # rest of this method cannot tell how the question arrived.
+        spoken = bool(post.get("voice"))
+        if spoken:
+            text = await self._transcribe_voice(post["voice"])
+            if not text:
+                return
+            log.info("Transcribed voice message: %s", text[:80])
+        else:
+            text = (post.get("text") or post.get("caption") or "").strip()
         if not text:
             return
         if text in {"/start", "/help"}:
@@ -196,7 +210,56 @@ class TelegramChannelMonitor:
         except Exception:  # noqa: BLE001 - the assistant must never kill the loop
             log.exception("Assistant failed to answer.")
             return
-        await self._notifier.send_plain(answer)
+        await self._deliver_answer(answer, spoken=spoken)
+
+    async def _transcribe_voice(self, voice: dict) -> str:
+        """Download a Telegram voice note and turn it into text."""
+        if not self._transcriber:
+            await self._notifier.send_notice(
+                "קיבלתי הודעה קולית אבל תמלול לא מוגדר. תכתוב לי בטקסט."
+            )
+            return ""
+        try:
+            path = await self._client.get_file_path(voice["file_id"])
+            audio = await self._client.download_file(path)
+            return (await self._transcriber.transcribe(audio, "voice.ogg")).strip()
+        except Exception:  # noqa: BLE001 - a bad clip must not kill the loop
+            log.exception("Could not transcribe voice message.")
+            await self._notifier.send_notice("לא הצלחתי לתמלל את ההודעה הקולית.")
+            return ""
+
+    async def _deliver_answer(self, answer: str, spoken: bool) -> None:
+        """Answer in the medium the question arrived in.
+
+        With headphones in a mall, a text reply is useless — and a voice reply
+        to something typed at a desk is worse. "match" makes the round trip
+        symmetric without him having to configure a mode per situation.
+        """
+        mode = self._config.voice_reply_mode
+        want_voice = mode == "voice" or mode == "both" or (mode == "match" and spoken)
+        want_text = mode == "text" or mode == "both" or (mode == "match" and not spoken)
+
+        if want_voice and self._speaker:
+            try:
+                audio = await self._speaker.speak(answer)
+            except Exception:  # noqa: BLE001
+                log.exception("Speech synthesis failed; falling back to text.")
+                audio = None
+            if audio:
+                try:
+                    await self._client.send_voice(
+                        self._config.alert_chat_id, audio, filename="reply.ogg"
+                    )
+                    if not want_text:
+                        return
+                except Exception:  # noqa: BLE001
+                    log.exception("Could not send voice reply; falling back to text.")
+            else:
+                # Nothing was synthesised — the answer still has to arrive.
+                want_text = True
+
+        if want_text or not self._speaker:
+            await self._notifier.send_plain(answer)
 
     def _is_watched(self, chat: dict) -> bool:
         if not self._wanted:

@@ -55,6 +55,7 @@ Telegram ch. ─┘                                              │
 | `monitoring.py` | alert history + per-source health, for the dashboard |
 | `dashboard.py` | dependency-free HTTP status page |
 | `assistant.py` | conversational AI layer (Claude + tools) |
+| `voice.py` | speech in / speech out, swappable providers |
 | `cameras.py` | **RTSP placeholder layer** — read its docstring |
 
 ---
@@ -135,6 +136,69 @@ ANTHROPIC_API_KEY=sk-ant-...
 
 The `anthropic` import is lazy, so the monitor runs without the package
 installed as long as the assistant is off.
+
+---
+
+## Voice — talking to it with headphones on
+
+You hold the mic button in Telegram, speak Hebrew, and the answer comes back as
+a voice note that auto-plays in your ear. Nothing to install on the phone;
+Telegram already carries both directions.
+
+```
+you (hold mic) ──► Telegram ──► transcribe ──► assistant ──► speak ──► voice note
+```
+
+**The format detail that makes it work.** Telegram voice messages are OPUS in
+an OGG container, and `sendVoice` requires the same going back. An MP3 is
+accepted but renders as a music file — no waveform, no auto-play, useless in a
+pocket. OpenAI's speech endpoint emits opus directly, so the round trip needs
+no ffmpeg and no transcoding.
+
+**Reply medium follows the question.** `VOICE_REPLY_MODE=match` (the default)
+speaks back only when you spoke first. A text reply is useless with headphones
+in a mall; a voice reply to something typed at a desk is worse.
+
+**Providers are swappable.** Claude does no speech, so this needs a second
+provider. The `Transcriber` / `Speaker` interfaces in `voice.py` are the whole
+integration surface:
+
+| `VOICE_PROVIDER` | Transcribe | Speak | Notes |
+|---|---|---|---|
+| `openai` | whisper-1 | gpt-4o-mini-tts | Fast, good Hebrew. ~$0.006/min in, ~$0.015/1k chars out. |
+| `local` | faster-whisper on your host | OpenAI, if a key is set | No audio leaves the machine. Slower; first run downloads the model. |
+
+Local transcription with no local synthesis is deliberate — offline Hebrew TTS
+is poor enough that a bad voice is worse than no voice, so it answers in text.
+
+**Every failure still delivers.** Synthesis failure falls back to text, a
+transcription failure says so rather than guessing, and an unintelligible clip
+never reaches the model. Stranger voice notes are dropped before the download,
+so nothing unauthorised is ever paid for.
+
+```bash
+VOICE_ENABLED=true
+OPENAI_API_KEY=sk-...
+```
+
+---
+
+## Running it 24/7
+
+```bash
+cp security_alert_system/.env.example .env    # then fill it in
+docker compose up -d
+docker compose logs -f
+```
+
+`restart: unless-stopped` in `docker-compose.yml` is what makes it actually
+24/7 — the container returns after a crash, a Docker daemon restart, and a host
+reboot. Dedupe state and alert history live in a named volume, so a redeploy
+does not re-alert on whatever is currently in the feeds.
+
+The dashboard stays bound to `127.0.0.1` inside the container and is not
+published. Reach it with `docker compose exec alerts curl -s localhost:8080/api/status`
+or an SSH tunnel.
 
 ---
 
@@ -275,10 +339,11 @@ Use the official app for actual sirens.
 python -m unittest discover -s security_alert_system/tests -t .
 ```
 
-93 tests, no network, no bot token and no API key required — the Telegram and
-Anthropic clients are both stubbed.
+113 tests, no network and no keys of any kind required — the Telegram,
+Anthropic and speech clients are all stubbed.
 Covers Hebrew normalisation, affix and feminine-plural matching, the tuned
 false-positive guards, feed→alert flow, dedupe across restarts, HTML escaping,
 the camera severity gate, source-health transitions, history persistence, the
 dashboard's routes and token auth (over a real socket on an ephemeral port), and
-the assistant's tools, history bounds, failure paths, and access check.
+the assistant's tools, history bounds, failure paths and access check, and
+the voice round trip including every fallback path.

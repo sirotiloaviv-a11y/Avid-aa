@@ -153,6 +153,65 @@ class TelegramClient:
         )
 
 
+    async def send_voice(
+        self,
+        chat_id: str,
+        audio: bytes,
+        caption: str = "",
+        filename: str = "reply.ogg",
+        duration_seconds: int | None = None,
+    ) -> dict[str, Any]:
+        """Send a voice note — the reply plays straight into his headphones.
+
+        Telegram requires OGG/OPUS for a true voice message. Anything else is
+        accepted by sendAudio but renders as a music file, which does not
+        auto-play in a chat.
+        """
+        payload: dict[str, Any] = {"chat_id": chat_id, "caption": caption[:1000]}
+        if duration_seconds:
+            payload["duration"] = duration_seconds
+        return await self._call(
+            "sendVoice",
+            payload,
+            files={"voice": (filename, audio, "audio/ogg")},
+        )
+
+    async def get_file_path(self, file_id: str) -> str:
+        """Resolve a file_id to the relative path used by the download endpoint."""
+        result = await self._call("getFile", {"file_id": file_id})
+        path = (result or {}).get("file_path")
+        if not path:
+            raise TelegramError(f"getFile returned no file_path for {file_id}")
+        return path
+
+    async def download_file(self, file_path: str, max_bytes: int = 20 * 1024 * 1024) -> bytes:
+        """Download a file from the bot file endpoint.
+
+        Note this is a different host path than the API methods — files live at
+        /file/bot<token>/<path>, not under the method root, so it bypasses
+        ``_call`` and its JSON envelope.
+        """
+        if self._client is None:
+            raise RuntimeError("TelegramClient must be used as an async context manager.")
+        url = f"{API_ROOT}/file/bot{self._token}/{file_path}"
+        delay = 2.0
+        last_error: Exception | None = None
+        for attempt in range(1, self._max_retries + 1):
+            try:
+                response = await self._client.get(url)
+            except (httpx.TransportError, httpx.TimeoutException) as exc:
+                last_error = exc
+                await asyncio.sleep(delay)
+                delay *= 2
+                continue
+            if response.status_code >= 400:
+                raise TelegramError(f"download failed: HTTP {response.status_code}")
+            if len(response.content) > max_bytes:
+                raise TelegramError(f"file is larger than {max_bytes} bytes")
+            return response.content
+        raise TelegramError("download failed after retries") from last_error
+
+
 def _retry_after(response: httpx.Response) -> float:
     try:
         return float(response.json()["parameters"]["retry_after"])

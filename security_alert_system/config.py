@@ -92,6 +92,17 @@ class Config:
     # Add a line of context to alerts at or above this severity.
     assistant_brief_on_severity: str = "CRITICAL"
 
+    # --- Voice (see voice.py) -------------------------------------------
+    voice_enabled: bool = False
+    voice_provider: str = "openai"          # openai | local | none
+    openai_api_key: str = ""
+    voice_transcribe_model: str = "whisper-1"
+    voice_speak_model: str = "gpt-4o-mini-tts"
+    voice_name: str = "shimmer"
+    voice_whisper_model: str = "small"      # local provider only
+    # match = answer in the medium the question arrived in.
+    voice_reply_mode: str = "match"         # match | voice | text | both
+
     # --- Dashboard (see dashboard.py) -----------------------------------
     dashboard_enabled: bool = True
     dashboard_host: str = "127.0.0.1"
@@ -140,6 +151,14 @@ class Config:
             assistant_brief_on_severity=os.getenv(
                 "ASSISTANT_BRIEF_ON_SEVERITY", "CRITICAL"
             ).upper(),
+            voice_enabled=_env_bool("VOICE_ENABLED", False),
+            voice_provider=os.getenv("VOICE_PROVIDER", "openai").strip().lower(),
+            openai_api_key=os.getenv("OPENAI_API_KEY", "").strip(),
+            voice_transcribe_model=os.getenv("VOICE_TRANSCRIBE_MODEL", "whisper-1").strip(),
+            voice_speak_model=os.getenv("VOICE_SPEAK_MODEL", "gpt-4o-mini-tts").strip(),
+            voice_name=os.getenv("VOICE_NAME", "shimmer").strip(),
+            voice_whisper_model=os.getenv("VOICE_WHISPER_MODEL", "small").strip(),
+            voice_reply_mode=os.getenv("VOICE_REPLY_MODE", "match").strip().lower(),
             dashboard_enabled=_env_bool("DASHBOARD_ENABLED", True),
             dashboard_host=os.getenv("DASHBOARD_HOST", "127.0.0.1").strip(),
             dashboard_port=_env_int("DASHBOARD_PORT", 8080),
@@ -173,6 +192,22 @@ class Config:
             problems.append(
                 f"ASSISTANT_EFFORT is '{self.assistant_effort}' — must be one of "
                 "low, medium, high, xhigh, max."
+            )
+        if self.voice_enabled and not self.assistant_enabled:
+            problems.append(
+                "VOICE_ENABLED is on but ASSISTANT_ENABLED is off — there is "
+                "nothing to talk to. Turn on the assistant as well."
+            )
+        if self.voice_enabled and self.voice_provider == "openai" and not self.openai_api_key:
+            problems.append("VOICE_PROVIDER is openai but OPENAI_API_KEY is not set.")
+        if self.voice_enabled and self.voice_provider not in {"openai", "local", "none"}:
+            problems.append(
+                f"VOICE_PROVIDER is '{self.voice_provider}' — must be openai, local or none."
+            )
+        if self.voice_reply_mode not in {"match", "voice", "text", "both"}:
+            problems.append(
+                f"VOICE_REPLY_MODE is '{self.voice_reply_mode}' — must be "
+                "match, voice, text or both."
             )
         if (
             self.dashboard_enabled

@@ -1,0 +1,43 @@
+# 24/7 deployment. From the repository root:
+#
+#   cp security_alert_system/.env.example .env   # then fill it in
+#   docker compose up -d
+#   docker compose logs -f
+#
+# restart: unless-stopped is what makes this actually 24/7 — the container
+# comes back after a crash, a Docker daemon restart, and a host reboot. Without
+# it a reboot at 3am silently ends the monitoring.
+services:
+  alerts:
+    build:
+      context: .
+      dockerfile: security_alert_system/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      # Dedupe state and alert history. Without this, every redeploy re-alerts
+      # on whatever is currently in the feeds.
+      - alertstate:/app/security_alert_system/state
+    # The dashboard binds to 127.0.0.1 inside the container, so it is not
+    # published here. Reach it with:
+    #   docker compose exec alerts curl -s localhost:8080/api/status
+    # or an SSH tunnel: ssh -L 8080:127.0.0.1:8080 you@host
+    # To expose it, set DASHBOARD_HOST=0.0.0.0 and DASHBOARD_TOKEN in .env,
+    # then uncomment:
+    # ports:
+    #   - "127.0.0.1:8080:8080"
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8080/healthz',timeout=5)"]
+      interval: 60s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  alertstate:

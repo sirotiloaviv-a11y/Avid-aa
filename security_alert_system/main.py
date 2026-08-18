@@ -80,6 +80,18 @@ async def run_monitor(config: Config) -> int:
             config.assistant_brief_on_severity,
         )
 
+    transcriber, speaker = None, None
+    if config.voice_enabled:
+        from .voice import build_voice
+
+        transcriber, speaker = build_voice(config)
+        log.info(
+            "Voice enabled: %s in, %s out, reply mode %s.",
+            transcriber.name if transcriber else "none",
+            speaker.name,
+            config.voice_reply_mode,
+        )
+
     stop = asyncio.Event()
     install_signal_handlers(stop)
 
@@ -117,7 +129,8 @@ async def run_monitor(config: Config) -> int:
 
         rss = RSSMonitor(config, notifier, state, runtime)
         telegram = TelegramChannelMonitor(
-            config, client, notifier, state, runtime, assistant=assistant
+            config, client, notifier, state, runtime, assistant=assistant,
+            transcriber=transcriber, speaker=speaker,
         )
 
         tasks = [
@@ -260,6 +273,10 @@ def check_config(config: Config) -> int:
               f"{config.assistant_brief_on_severity}+)")
     else:
         print("Assistant: disabled")
+    if config.voice_enabled:
+        print(f"Voice: {config.voice_provider} (reply mode {config.voice_reply_mode})")
+    else:
+        print("Voice: disabled")
     print(CameraRegistry.from_env(BASE_DIR).describe())
     if problems:
         print("\nProblems:")
