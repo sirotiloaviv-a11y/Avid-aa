@@ -1,0 +1,29 @@
+[
+  {
+    "id": "gate",
+    "name": "שער כניסה",
+    "rtsp_url": "rtsp://user:password@192.168.1.50:554/stream1",
+    "enabled": true,
+    "transport": "tcp",
+    "timeout_seconds": 12,
+    "tags": ["outdoor", "perimeter"]
+  },
+  {
+    "id": "yard",
+    "name": "חצר אחורית",
+    "rtsp_url": "rtsp://user:password@192.168.1.51:554/h264Preview_01_main",
+    "enabled": true,
+    "transport": "tcp",
+    "timeout_seconds": 12,
+    "tags": ["outdoor"]
+  },
+  {
+    "id": "shelter",
+    "name": "ממ\"ד",
+    "rtsp_url": "rtsp://user:password@192.168.1.52:554/live",
+    "enabled": false,
+    "transport": "tcp",
+    "timeout_seconds": 12,
+    "tags": ["indoor"]
+  }
+]
