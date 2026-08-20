@@ -88,6 +88,13 @@ class Settings:
     scan_max_users: int = 0  # 0 = no limit; useful for trials and smoke tests
     scan_interval_hours: int = 24
 
+    # --- Local development ------------------------------------------------
+    # Lets the service boot with no provider configured, so `docker compose up`
+    # plus `--seed-demo` gives you a working dashboard without a real Google or
+    # Entra tenant. It relaxes nothing else: encryption and API-key auth are
+    # unchanged, and no connector behaves differently.
+    demo_mode: bool = False
+
     @property
     def dsn(self) -> str:
         return self.database_url
@@ -112,13 +119,15 @@ class Settings:
             problems.append("API_KEY is required — it guards every /v1 endpoint.")
         if not self.database_url:
             problems.append("DATABASE_URL is required.")
-        if not self.enabled_providers:
+        if not self.enabled_providers and not self.demo_mode:
             # One provider is enough to run the product; zero means no customer
-            # can connect anything, which is a misconfiguration, not a choice.
+            # can connect anything, which is a misconfiguration, not a choice —
+            # unless you are running the local demo stack and said so.
             problems.append(
                 "Configure at least one provider: GOOGLE_CLIENT_ID/"
                 "GOOGLE_CLIENT_SECRET for Google Workspace, or "
-                "MICROSOFT_CLIENT_ID/MICROSOFT_CLIENT_SECRET for Microsoft 365."
+                "MICROSOFT_CLIENT_ID/MICROSOFT_CLIENT_SECRET for Microsoft 365. "
+                "For a local dashboard with seeded data, set DEMO_MODE=true."
             )
         return problems
 
@@ -145,6 +154,7 @@ def load_settings(env_file: Path | None = None) -> Settings:
         scan_concurrency=_env_int("SCAN_CONCURRENCY", 8),
         scan_max_users=_env_int("SCAN_MAX_USERS", 0),
         scan_interval_hours=_env_int("SCAN_INTERVAL_HOURS", 24),
+        demo_mode=_env_bool("DEMO_MODE", False),
     )
 
 

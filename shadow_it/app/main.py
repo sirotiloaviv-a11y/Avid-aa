@@ -3,6 +3,7 @@
     uvicorn app.main:app --reload          # development
     python -m app.main --check             # validate config and exit
     python -m app.main --scan <tenant_id>  # run one scan from the CLI
+    python -m app.main --seed-demo         # local demo data, no provider needed
 
 Everything expensive (pool, schema, scheduler) is built in the lifespan hook,
 so importing this module stays cheap for tests and for the CLI paths.
@@ -133,11 +134,32 @@ async def _cli_scan(tenant_id: str, config: Settings) -> int:
         await context.db.close()
 
 
+async def _cli_seed(config: Settings) -> int:
+    from .seed import seed_demo
+
+    context, _ = await build_context(config)
+    try:
+        result = await seed_demo(context.repo)
+        print(
+            f"Seeded tenant {result['tenant_id']} ({result['domain']}) "
+            f"with {result['apps']} apps."
+        )
+        print(f"Dashboard: open the web app and pick {result['domain']}.")
+        return 0
+    finally:
+        await context.db.close()
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Shadow IT discovery service")
     parser.add_argument("--check", action="store_true", help="validate config and exit")
     parser.add_argument("--migrate", action="store_true", help="apply the schema and exit")
     parser.add_argument("--scan", metavar="TENANT_ID", help="run one scan and exit")
+    parser.add_argument(
+        "--seed-demo",
+        action="store_true",
+        help="create a demo tenant with a scored inventory, for local development",
+    )
     parser.add_argument("--serve", action="store_true", help="run the HTTP server")
     args = parser.parse_args(argv)
 
@@ -165,6 +187,9 @@ def main(argv: list[str] | None = None) -> int:
         asyncio.run(_migrate())
         print("Schema applied.")
         return 0
+
+    if args.seed_demo:
+        return asyncio.run(_cli_seed(config))
 
     if args.scan:
         return asyncio.run(_cli_scan(args.scan, config))

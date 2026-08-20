@@ -15,6 +15,38 @@ inventory, scoring and change feed are shared.
 
 ---
 
+## Run the whole thing locally
+
+```bash
+docker compose up --build                              # db + api + dashboard
+docker compose --profile seed run --rm seed            # optional: demo data
+open http://localhost:3000
+```
+
+No configuration needed. Compose ships literal development values for
+`ENCRYPTION_KEY` and `API_KEY` and sets `DEMO_MODE=true`, which lets the API
+boot with no provider configured — so you get a working dashboard without a
+real Workspace or Entra tenant. Both keys are overridable from a `.env` file in
+this directory, and both must be replaced before this touches a real customer.
+
+The seed does not fabricate scores: it builds grants and pushes them through
+the same risk engine and the same repository writes a real scan uses, so the
+local inventory is what the product would actually have produced. It spans both
+providers and all three bands, with `SuperGPT Mail Assistant` (unverified
+publisher, full mailbox) and `ShadowSync Backup` (app-only, tenant-wide,
+unverified) at the top.
+
+| Service | URL | Notes |
+|---|---|---|
+| Dashboard | http://localhost:3000 | Next.js, server-rendered |
+| API | http://localhost:8000/docs | interactive OpenAPI docs |
+| Postgres | localhost — not published | reach it with `docker compose exec db psql -U shadowit` |
+
+Both published ports bind to `127.0.0.1`, so nothing is exposed to your
+network.
+
+---
+
 ## Folder structure
 
 ```
@@ -48,9 +80,17 @@ shadow_it/
 │       ├── tenants.py           tenant CRUD, API keys, policy rules
 │       ├── connect.py           connect + callback + test, per provider
 │       └── inventory.py         scans, app inventory, triage, revocation
+│   └── seed.py                  demo inventory for local development
+├── web/                         Next.js dashboard (see web/README.md)
+│   ├── lib/api.ts               server-side API client — the key never
+│   │                            reaches the browser
+│   ├── app/page.tsx             tenant picker
+│   ├── app/tenants/[tenantId]/  counts, filters, the app table
+│   ├── app/api/scan/route.ts    proxy for the "run scan" button
+│   └── Dockerfile
 ├── tests/                       risk engine + Graph parsing (no DB, no network)
 ├── Dockerfile
-├── docker-compose.yml
+├── docker-compose.yml           db + api + web, runs with no configuration
 ├── requirements.txt
 └── .env.example
 ```
@@ -268,10 +308,14 @@ are both supported shapes; `GET /v1/connect/providers` reports what is enabled.
 
 **2. Configure and run**
 
+For anything beyond the local demo, create a `.env` — Compose reads it
+automatically and it overrides every development default:
+
 ```bash
 cp .env.example .env
 python -c "from cryptography.fernet import Fernet;print(Fernet.generate_key().decode())"  # ENCRYPTION_KEY
 python -c "import secrets;print('sk_'+secrets.token_urlsafe(32))"                          # API_KEY
+# ...then set DEMO_MODE=false and fill in the provider credentials.
 docker compose up --build
 ```
 
@@ -307,6 +351,41 @@ curl -s "localhost:8000/v1/tenants/$TENANT_ID/apps?band=high" -H "Authorization:
 ```
 
 You can also run a scan straight from the CLI: `python -m app.main --scan <tenant_id>`.
+
+---
+
+## Dashboard
+
+A small Next.js (App Router) frontend in `web/`. Full notes in
+`web/README.md`; the rule that shapes it:
+
+**The API key never reaches the browser.** It is an operator key that can read
+every tenant, so it stays in the Next.js server process. Pages are server
+components that fetch at render time and ship HTML; the one mutation ("run
+scan") posts to the app's own route handler, which validates the tenant id and
+attaches the key server-side. Nothing is exposed as `NEXT_PUBLIC_*`.
+
+That also means no browser request ever hits the API directly, so
+`CORS_ORIGINS` can stay empty.
+
+| Route | Shows |
+|---|---|
+| `/` | tenant picker |
+| `/tenants/{id}` | counts by band, scan state per provider, filters, the app table |
+| `/tenants/{id}/apps/{appId}` | score reasons, capabilities, scopes, who granted it |
+
+The table leads with the signals a reviewer triages on — unverified publisher,
+tenant-wide, app-only, admin grants — because those are the difference between
+"this app has Drive access" and "an app nobody can vouch for has Drive access
+for everyone". Filters are a plain `<form method="get">`, so the state lives in
+the URL and is shareable, with no client JavaScript.
+
+To iterate on the frontend against the compose backend:
+
+```bash
+cd web && npm install
+API_URL=http://localhost:8000 API_KEY=sk_local_dev_do_not_use_in_production npm run dev
+```
 
 ---
 
@@ -388,11 +467,14 @@ application; after that our client-credentials requests simply stop working.
 python -m unittest discover -s tests -t .
 ```
 
-47 tests covering scope weighting, categorization, banding, policy overrides,
-aggregation, and the Graph translation layer (service principal parsing,
-delegated vs tenant-wide vs app-only grants, appRole id resolution). No
-database, no network, no credentials — the Graph tests run against captured
-response shapes.
+58 tests covering scope weighting, categorization, banding, policy overrides,
+aggregation, the Graph translation layer (service principal parsing, delegated
+vs tenant-wide vs app-only grants, appRole id resolution), the signed-state CSRF
+primitive, and the shape of the demo inventory. No database, no network, no
+credentials — the Graph tests run against captured response shapes.
+
+The frontend has no tests; `npm run typecheck` in `web/` is the check that
+matters there.
 
 ---
 
@@ -415,6 +497,9 @@ response shapes.
   some grants come back attributed to `(unknown principal ...)`.
 - **Back up `ENCRYPTION_KEY` outside the database.** Losing it means every
   customer reconnects.
+- **The dashboard holds the operator key.** Anyone who can reach it can read
+  every tenant, so put real authentication in front of it before exposing it
+  beyond localhost — the compose file binds it to `127.0.0.1` for that reason.
 
 ## Roadmap
 

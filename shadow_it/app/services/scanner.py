@@ -186,11 +186,15 @@ class Scheduler:
     def __init__(self, scans: ScanService, repo: Repository, interval_hours: int):
         self._scans = scans
         self._repo = repo
-        self._interval = max(1, interval_hours) * 3600
+        # 0 (or less) disables scheduled scans entirely. That is the documented
+        # way to run extra API replicas without running extra schedulers, so it
+        # has to actually mean zero rather than clamping up to an hour.
+        self._interval = interval_hours * 3600 if interval_hours > 0 else 0
         self._task: asyncio.Task | None = None
 
     def start(self) -> None:
         if self._interval <= 0:
+            log.info("Scheduled scans are disabled (SCAN_INTERVAL_HOURS=0)")
             return
         self._task = asyncio.create_task(self._loop(), name="shadow-it-scheduler")
 

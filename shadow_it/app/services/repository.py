@@ -275,12 +275,12 @@ class Repository:
             """
             UPDATE scans
                SET status = $2, users_scanned = $3, grants_found = $4,
-                   apps_found = $5, new_apps = $6, errors = $7::jsonb,
+                   apps_found = $5, new_apps = $6, errors = $7,
                    finished_at = now()
              WHERE id = $1
             """,
             scan_id, status, users_scanned, grants_found, apps_found, new_apps,
-            json.dumps(errors or []),
+            errors or [],
         )
 
     async def latest_scan(self, tenant_id: str, provider: Provider | None = None) -> dict | None:
@@ -352,7 +352,7 @@ class Repository:
                          category, scopes, user_count, admin_count,
                          risk_score, risk_band, risk_reasons, capabilities)
                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
-                            $13, $14, $15::jsonb, $16::jsonb)
+                            $13, $14, $15, $16)
                     ON CONFLICT (tenant_id, provider, client_id) DO UPDATE
                         SET display_name  = EXCLUDED.display_name,
                             is_anonymous  = EXCLUDED.is_anonymous,
@@ -375,8 +375,7 @@ class Repository:
                     app.is_anonymous, app.is_native_app, app.tenant_wide_consent,
                     app.has_application_permissions, assessment.category, scopes,
                     app.install_count, len(app.admin_user_emails), assessment.score,
-                    assessment.band.value, json.dumps(assessment.reasons),
-                    json.dumps(assessment.capabilities),
+                    assessment.band.value, assessment.reasons, assessment.capabilities,
                 )
                 app_id = str(app_id)
 
@@ -385,9 +384,9 @@ class Repository:
                     await conn.execute(
                         """
                         INSERT INTO app_events (tenant_id, app_id, scan_id, kind, summary, detail)
-                        VALUES ($1, $2, $3, $4, $5, $6::jsonb)
+                        VALUES ($1, $2, $3, $4, $5, $6)
                         """,
-                        tenant_id, app_id, scan_id, kind, summary, json.dumps(detail),
+                        tenant_id, app_id, scan_id, kind, summary, detail,
                     )
 
         return {"app_id": app_id, "is_new": previous is None, "events": len(events)}

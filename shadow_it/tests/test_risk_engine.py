@@ -183,3 +183,48 @@ class TestAggregation(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestDemoInventory(unittest.TestCase):
+    """The seeded demo data has a job: show what the product is for.
+
+    If every demo app lands in one band, the local dashboard demonstrates
+    nothing — so the shape of that inventory is worth asserting.
+    """
+
+    def setUp(self):
+        from app.risk import assess_all
+        from app.seed import DEMO_APPS, DEMO_DIRECTORY_SIZE, _people, _to_app
+
+        people = _people()
+        apps = [_to_app(demo, people)[0] for demo in DEMO_APPS]
+        self.scored = dict(
+            (app.display_name, assessment)
+            for app, assessment in assess_all(apps, RiskPolicy(directory_size=DEMO_DIRECTORY_SIZE))
+        )
+
+    def test_all_three_bands_are_represented(self):
+        bands = {a.band for a in self.scored.values()}
+        self.assertEqual(bands, {RiskBand.HIGH, RiskBand.MEDIUM, RiskBand.LOW})
+
+    def test_the_headline_findings_are_high(self):
+        for name in (
+            "SuperGPT Mail Assistant",     # unverified publisher, full mailbox
+            "nw-provisioning-script",      # internal script with directory write
+            "Contoso Invoice Sync",        # app-only mail and file access
+            "ShadowSync Backup",           # every Entra flag at once
+        ):
+            with self.subTest(app=name):
+                self.assertEqual(self.scored[name].band, RiskBand.HIGH)
+
+    def test_the_boring_apps_stay_boring(self):
+        self.assertEqual(self.scored["Sign in with Google — Figma"].band, RiskBand.LOW)
+        self.assertEqual(self.scored["1Password Business"].band, RiskBand.LOW)
+
+    def test_both_providers_are_present(self):
+        from app.models import Provider
+        from app.seed import DEMO_APPS
+
+        self.assertEqual(
+            {d.provider for d in DEMO_APPS}, {Provider.GOOGLE, Provider.MICROSOFT}
+        )
