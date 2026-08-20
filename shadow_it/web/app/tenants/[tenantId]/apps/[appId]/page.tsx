@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { getApp } from "@/lib/api";
+import { attempt, getApp } from "@/lib/api";
 import { AppFlags, RiskBadge, StatusBadge } from "@/components/Badges";
 import { ErrorPanel } from "@/components/ErrorPanel";
 
@@ -18,12 +18,9 @@ export default async function AppDetail({
 }) {
   const { tenantId, appId } = await params;
 
-  let app;
-  try {
-    app = await getApp(tenantId, appId);
-  } catch (error) {
-    return <ErrorPanel error={error} />;
-  }
+  const result = await attempt(getApp(tenantId, appId));
+  if (!result.ok) return <ErrorPanel error={result.error} />;
+  const app = result.data;
 
   const grants = app.grants ?? [];
 

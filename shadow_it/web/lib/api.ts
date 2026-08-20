@@ -54,6 +54,24 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   return (await response.json()) as T;
 }
 
+/**
+ * Run a request and capture the failure instead of throwing.
+ *
+ * Pages use this rather than a bare try/catch around `let x;` — assigning to an
+ * un-annotated `let` inside a try makes the value implicitly `any`, which
+ * silently switches off every type below. The whole point of those types is to
+ * catch a renamed API field at build time, so it matters that they survive.
+ */
+export type Result<T> = { ok: true; data: T } | { ok: false; error: unknown };
+
+export async function attempt<T>(promise: Promise<T>): Promise<Result<T>> {
+  try {
+    return { ok: true, data: await promise };
+  } catch (error) {
+    return { ok: false, error };
+  }
+}
+
 export const api = {
   get: <T>(path: string) => request<T>("GET", path),
   post: <T>(path: string, body?: unknown) => request<T>("POST", path, body),

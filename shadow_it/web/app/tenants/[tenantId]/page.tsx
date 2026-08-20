@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { getSummary, listApps, type Scan } from "@/lib/api";
+import { attempt, getSummary, listApps, type Scan } from "@/lib/api";
 import { AppFlags, RiskBadge, StatusBadge } from "@/components/Badges";
 import { ErrorPanel } from "@/components/ErrorPanel";
 import { ScanButton } from "@/components/ScanButton";
@@ -34,15 +34,11 @@ export default async function TenantDashboard({
   if (provider) query.set("provider", provider);
   if (q) query.set("search", q);
 
-  let summary, apps;
-  try {
-    [summary, { apps }] = await Promise.all([
-      getSummary(tenantId),
-      listApps(tenantId, query),
-    ]);
-  } catch (error) {
-    return <ErrorPanel error={error} />;
-  }
+  const result = await attempt(
+    Promise.all([getSummary(tenantId), listApps(tenantId, query)]),
+  );
+  if (!result.ok) return <ErrorPanel error={result.error} />;
+  const [summary, { apps }] = result.data;
 
   const { counts } = summary;
   const filtered = Boolean(band || status || provider || q);

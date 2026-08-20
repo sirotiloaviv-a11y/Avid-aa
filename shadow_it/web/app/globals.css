@@ -121,7 +121,9 @@ th {
 }
 tbody tr:last-child td { border-bottom: none; }
 tbody tr:hover { background: color-mix(in srgb, var(--accent) 6%, transparent); }
-td.num { text-align: right; font-variant-numeric: tabular-nums; }
+/* Header and data must agree, or the numeric columns look ragged. */
+th.num, td.num { text-align: right; }
+td.num { font-variant-numeric: tabular-nums; }
 td.name { font-weight: 550; }
 td.name .cid { display: block; color: var(--muted); font-weight: 400; font-size: 0.76rem;
                font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }

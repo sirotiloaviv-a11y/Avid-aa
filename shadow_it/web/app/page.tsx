@@ -1,16 +1,13 @@
 import Link from "next/link";
-import { listTenants } from "@/lib/api";
+import { attempt, listTenants } from "@/lib/api";
 import { ErrorPanel } from "@/components/ErrorPanel";
 
 export const dynamic = "force-dynamic";
 
 export default async function TenantsPage() {
-  let tenants;
-  try {
-    ({ tenants } = await listTenants());
-  } catch (error) {
-    return <ErrorPanel error={error} />;
-  }
+  const result = await attempt(listTenants());
+  if (!result.ok) return <ErrorPanel error={result.error} />;
+  const { tenants } = result.data;
 
   return (
     <>
