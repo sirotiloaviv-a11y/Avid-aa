@@ -1,0 +1,16 @@
+# The build context is this directory, which now also holds the frontend —
+# without this, every API image build would ship web/node_modules.
+web/
+tests/
+.env
+*.env
+!.env.example
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+.git/
+README.md
+docker-compose.yml

@@ -1,0 +1,156 @@
+/* One stylesheet, no framework. The dashboard is a table and some cards; a
+   build-time CSS toolchain would be more moving parts than the whole UI. */
+
+:root {
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --border: #e2e5ea;
+  --text: #14171c;
+  --muted: #666e7a;
+  --accent: #2f5bd7;
+
+  --high-bg: #fdeaea;
+  --high-fg: #a3161b;
+  --medium-bg: #fdf3e0;
+  --medium-fg: #8a5a06;
+  --low-bg: #eaf3ec;
+  --low-fg: #23694a;
+  --flag-bg: #f0eefb;
+  --flag-fg: #4b3fa3;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #12141a;
+    --surface: #191c24;
+    --border: #2a2f3a;
+    --text: #e8eaee;
+    --muted: #99a1ae;
+    --accent: #7c9bf5;
+
+    --high-bg: #3a1a1c;
+    --high-fg: #ff9a9e;
+    --medium-bg: #3a2e18;
+    --medium-fg: #f2c073;
+    --low-bg: #17301f;
+    --low-fg: #7fd3a4;
+    --flag-bg: #262246;
+    --flag-fg: #b3a9f5;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+.shell { max-width: 1200px; margin: 0 auto; padding: 1.5rem 1.25rem 4rem; }
+
+header.top {
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+header.top .shell { padding: 1rem 1.25rem; display: flex; align-items: baseline; gap: 1rem; }
+header.top h1 { font-size: 1.05rem; margin: 0; letter-spacing: -0.01em; }
+header.top .sub { color: var(--muted); font-size: 0.85rem; }
+
+h2 { font-size: 1.15rem; margin: 2rem 0 0.75rem; }
+h2:first-child { margin-top: 0; }
+p.lede { color: var(--muted); margin-top: 0.25rem; }
+
+/* --- cards ------------------------------------------------------------- */
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
+}
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.85rem 1rem;
+}
+.card .n { font-size: 1.6rem; font-weight: 650; letter-spacing: -0.02em; }
+.card .k { color: var(--muted); font-size: 0.78rem; text-transform: uppercase;
+           letter-spacing: 0.04em; }
+.card.high .n { color: var(--high-fg); }
+.card.medium .n { color: var(--medium-fg); }
+.card.low .n { color: var(--low-fg); }
+
+/* --- filters ----------------------------------------------------------- */
+.filters {
+  display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center;
+  margin-bottom: 1rem;
+}
+.filters select, .filters input, .btn {
+  font: inherit;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--text);
+}
+.filters input { min-width: 200px; }
+.btn { cursor: pointer; }
+.btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.btn:disabled { opacity: 0.55; cursor: progress; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn.primary:hover:not(:disabled) { color: #fff; filter: brightness(1.08); }
+
+/* --- table ------------------------------------------------------------- */
+.table-wrap {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  /* Wide content scrolls inside its own box; the page never scrolls sideways. */
+  overflow-x: auto;
+}
+table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+th, td { text-align: left; padding: 0.6rem 0.85rem; border-bottom: 1px solid var(--border); }
+th {
+  font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--muted); font-weight: 600; white-space: nowrap;
+}
+tbody tr:last-child td { border-bottom: none; }
+tbody tr:hover { background: color-mix(in srgb, var(--accent) 6%, transparent); }
+/* Header and data must agree, or the numeric columns look ragged. */
+th.num, td.num { text-align: right; }
+td.num { font-variant-numeric: tabular-nums; }
+td.name { font-weight: 550; }
+td.name .cid { display: block; color: var(--muted); font-weight: 400; font-size: 0.76rem;
+               font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+/* --- badges ------------------------------------------------------------ */
+.badge {
+  display: inline-block; padding: 0.1rem 0.45rem; border-radius: 999px;
+  font-size: 0.74rem; font-weight: 600; white-space: nowrap;
+}
+.badge.high { background: var(--high-bg); color: var(--high-fg); }
+.badge.medium { background: var(--medium-bg); color: var(--medium-fg); }
+.badge.low { background: var(--low-bg); color: var(--low-fg); }
+.badge.flag { background: var(--flag-bg); color: var(--flag-fg); }
+.badge.plain { background: var(--bg); color: var(--muted); border: 1px solid var(--border); }
+.flags { display: flex; flex-wrap: wrap; gap: 0.25rem; }
+
+/* --- misc -------------------------------------------------------------- */
+.empty, .error {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 10px; padding: 1.5rem; color: var(--muted);
+}
+.error { border-color: var(--high-fg); color: var(--high-fg); }
+.error code { display: block; margin-top: 0.5rem; font-size: 0.82rem; white-space: pre-wrap; }
+.reasons { margin: 0; padding-left: 1.1rem; }
+.reasons li { margin-bottom: 0.3rem; }
+.scopes { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8rem; }
+.row { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; }
+.spacer { flex: 1; }
+.muted { color: var(--muted); }
+.back { font-size: 0.85rem; }

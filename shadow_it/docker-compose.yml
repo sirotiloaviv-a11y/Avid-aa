@@ -1,0 +1,108 @@
+# The whole stack, locally:
+#
+#   docker compose up --build
+#   docker compose exec api python -m app.main --seed-demo   # optional demo data
+#   open http://localhost:3000
+#
+# It runs with no configuration at all. The secrets below are literal
+# development values, committed on purpose so a fresh clone starts; every one of
+# them is overridable from a .env file in this directory, which Compose picks up
+# automatically. Fill that in before pointing this at a real tenant.
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: shadowit
+      POSTGRES_PASSWORD: shadowit
+      POSTGRES_DB: shadowit
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shadowit"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: .
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://shadowit:shadowit@db:5432/shadowit
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8000}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+
+      # DEVELOPMENT KEY. Rotate before this touches a real customer: anyone
+      # with it can decrypt every stored credential.
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-c2hhZG93LWl0LWxvY2FsLWRldi1rZXktMzJieXRlcyE=}
+      ENCRYPTION_KEYS: ${ENCRYPTION_KEYS:-}
+      # DEVELOPMENT KEY. Grants operator access to every tenant.
+      API_KEY: ${API_KEY:-sk_local_dev_do_not_use_in_production}
+
+      # Lets the API boot with no provider configured, so the dashboard works
+      # on seeded data. Set to false once you add real credentials.
+      DEMO_MODE: ${DEMO_MODE:-true}
+
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      MICROSOFT_CLIENT_ID: ${MICROSOFT_CLIENT_ID:-}
+      MICROSOFT_CLIENT_SECRET: ${MICROSOFT_CLIENT_SECRET:-}
+
+      SCAN_CONCURRENCY: ${SCAN_CONCURRENCY:-8}
+      SCAN_MAX_USERS: ${SCAN_MAX_USERS:-0}
+      # 0 disables the background scheduler. Locally there is nothing real to
+      # scan, and an hourly failing scan is just noise in the logs.
+      SCAN_INTERVAL_HOURS: ${SCAN_INTERVAL_HOURS:-0}
+
+      # The dashboard talks to the API server-side, so no browser origin ever
+      # calls it directly and CORS can stay off.
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/healthz',timeout=5)"]
+      interval: 15s
+      timeout: 10s
+      start_period: 20s
+      retries: 5
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  web:
+    build: ./web
+    restart: unless-stopped
+    environment:
+      # Container-to-container; the browser never calls this address.
+      API_URL: http://api:8000
+      API_KEY: ${API_KEY:-sk_local_dev_do_not_use_in_production}
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:3000:3000"
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  # One-shot demo data: `docker compose --profile seed run --rm seed`
+  # Same image as the API, so it shares the schema and the risk engine.
+  seed:
+    build: .
+    profiles: ["seed"]
+    environment:
+      DATABASE_URL: postgresql://shadowit:shadowit@db:5432/shadowit
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-c2hhZG93LWl0LWxvY2FsLWRldi1rZXktMzJieXRlcyE=}
+      API_KEY: ${API_KEY:-sk_local_dev_do_not_use_in_production}
+      DEMO_MODE: "true"
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["python", "-m", "app.main", "--seed-demo"]
+
+volumes:
+  pgdata:
