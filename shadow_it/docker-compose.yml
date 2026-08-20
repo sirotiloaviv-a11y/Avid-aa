@@ -1,0 +1,46 @@
+# Local development stack:
+#   cp .env.example .env   # fill in ENCRYPTION_KEY, API_KEY, GOOGLE_CLIENT_*
+#   docker compose up --build
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: shadowit
+      POSTGRES_PASSWORD: shadowit
+      POSTGRES_DB: shadowit
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shadowit"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Overrides the .env value so the container reaches the db service.
+      DATABASE_URL: postgresql://shadowit:shadowit@db:5432/shadowit
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/healthz',timeout=5)"]
+      interval: 60s
+      timeout: 10s
+      start_period: 20s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  pgdata:
