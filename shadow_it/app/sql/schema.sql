@@ -39,7 +39,8 @@ DO $$ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 DO $$ BEGIN
-    CREATE TYPE auth_method AS ENUM ('oauth_refresh_token', 'service_account');
+    CREATE TYPE auth_method AS ENUM ('oauth_refresh_token', 'service_account',
+                                    'client_credentials');
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 DO $$ BEGIN
@@ -142,8 +143,15 @@ CREATE TABLE IF NOT EXISTS discovered_apps (
     display_name   TEXT          NOT NULL DEFAULT '',
     -- Google's "anonymous": the client is not registered to any verified
     -- project, so no publisher can be identified. Strongest Shadow IT signal.
+    -- Google: the client is registered to no verified project.
+    -- Microsoft: the service principal has no verified publisher.
+    -- Same question either way: can anyone vouch for this publisher?
     is_anonymous   BOOLEAN       NOT NULL DEFAULT FALSE,
     is_native_app  BOOLEAN       NOT NULL DEFAULT FALSE,
+    -- Entra only. An admin consented for the whole directory, and/or the app
+    -- holds app-only permissions that work with no user signed in.
+    tenant_wide_consent        BOOLEAN NOT NULL DEFAULT FALSE,
+    has_application_permissions BOOLEAN NOT NULL DEFAULT FALSE,
     category       TEXT          NOT NULL DEFAULT 'unknown',
     scopes         TEXT[]        NOT NULL DEFAULT '{}',
     user_count     INTEGER       NOT NULL DEFAULT 0,
@@ -179,7 +187,12 @@ CREATE TABLE IF NOT EXISTS app_grants (
     tenant_id     UUID        NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     app_id        UUID        NOT NULL REFERENCES discovered_apps(id) ON DELETE CASCADE,
     user_id       UUID        REFERENCES directory_users(id) ON DELETE SET NULL,
+    -- A real principal, or one of the synthetic Entra ones:
+    -- "(all users — admin consent)" / "(application — no user)".
     user_email    TEXT        NOT NULL,
+    grant_type    TEXT        NOT NULL DEFAULT 'delegated', -- delegated |
+                                                            -- tenant_wide |
+                                                            -- application
     scopes        TEXT[]      NOT NULL DEFAULT '{}',
     first_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     last_seen_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -271,4 +284,29 @@ BEGIN
     END LOOP;
 END $$;
 
+-- ------------------------------------------------------- migrations -------
+-- Bring a v1 database up to v2 (the Microsoft 365 connector). Additive only,
+-- so it is safe to run against a fresh database that already has these.
+--
+-- ALTER TYPE ... ADD VALUE is allowed inside a transaction on PostgreSQL 12+
+-- as long as the new value is not *used* in the same transaction. It is not.
+DO $$ BEGIN
+    ALTER TYPE auth_method ADD VALUE IF NOT EXISTS 'client_credentials';
+EXCEPTION WHEN undefined_object THEN NULL;
+END $$;
+
+ALTER TABLE discovered_apps
+    ADD COLUMN IF NOT EXISTS tenant_wide_consent BOOLEAN NOT NULL DEFAULT FALSE,
+    ADD COLUMN IF NOT EXISTS has_application_permissions BOOLEAN NOT NULL DEFAULT FALSE;
+
+ALTER TABLE app_grants
+    ADD COLUMN IF NOT EXISTS grant_type TEXT NOT NULL DEFAULT 'delegated';
+
+-- The two Entra shapes that affect everyone at once; the dashboard leads with
+-- them, so they get their own partial index rather than a sequential scan.
+CREATE INDEX IF NOT EXISTS discovered_apps_unattended_idx
+    ON discovered_apps (tenant_id, risk_score DESC)
+    WHERE tenant_wide_consent OR has_application_permissions;
+
 INSERT INTO schema_version (version) VALUES (1) ON CONFLICT DO NOTHING;
+INSERT INTO schema_version (version) VALUES (2) ON CONFLICT DO NOTHING;

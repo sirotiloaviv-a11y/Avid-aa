@@ -31,6 +31,10 @@ ANONYMOUS_CLIENT_POINTS = 15         # not registered in any Cloud project
 NATIVE_APP_POINTS = 5                # desktop/mobile client, secret can't be kept
 ADMIN_GRANT_POINTS = 15              # a super-admin authorized it
 WRITE_ACCESS_POINTS = 8
+# Entra-only shapes. Both are worse than any delegated grant of the same scope,
+# for reasons that have nothing to do with the scope itself.
+TENANT_WIDE_CONSENT_POINTS = 15      # an admin consented for everyone at once
+APPLICATION_PERMISSION_POINTS = 18   # app-only: runs with no user signed in
 WIDESPREAD_POINTS = 8                # many users, never reviewed
 FOOTHOLD_POINTS = 4                  # 3+ users: past "one curious employee"
 TRUSTED_DISCOUNT = -12
@@ -145,9 +149,28 @@ def assess(app: DiscoveredApp, policy: RiskPolicy | None = None) -> RiskAssessme
             "the grant inherits admin reach."
         )
 
+    if app.tenant_wide_consent:
+        score += TENANT_WIDE_CONSENT_POINTS
+        reasons.append(
+            "Admin-consented for the entire directory — every employee is "
+            "covered, and no employee opted in or can opt out."
+        )
+
+    if app.has_application_permissions:
+        score += APPLICATION_PERMISSION_POINTS
+        reasons.append(
+            "Holds application (app-only) permissions — it reads the tenant "
+            "with no user signed in, and keeps doing so after the person who "
+            "introduced it has left."
+        )
+
     installs = app.install_count
     fraction = installs / policy.directory_size if policy.directory_size else 0.0
-    if installs >= WIDESPREAD_USER_COUNT or (fraction and fraction >= WIDESPREAD_USER_FRACTION):
+    if app.tenant_wide_consent:
+        # Reach is already accounted for above; counting it twice would let a
+        # trivial tenant-wide grant outrank a genuinely invasive one.
+        pass
+    elif installs >= WIDESPREAD_USER_COUNT or (fraction and fraction >= WIDESPREAD_USER_FRACTION):
         score += WIDESPREAD_POINTS
         spread = f"{installs} users"
         if fraction:
@@ -178,10 +201,26 @@ def assess(app: DiscoveredApp, policy: RiskPolicy | None = None) -> RiskAssessme
             reasons.append("Floored to high: unverified publisher holding write access.")
         score = max(score, HIGH_THRESHOLD)
 
+    # App-only access to a sensitive API is a standing, unattended foothold in
+    # the tenant. It is the shape every serious M365 compromise has taken, and
+    # no amount of vendor reputation changes that.
+    if app.has_application_permissions and max_weight >= 8:
+        if score < HIGH_THRESHOLD:
+            reasons.append(
+                "Floored to high: app-only permissions on a sensitive API, "
+                "usable without any user."
+            )
+        score = max(score, HIGH_THRESHOLD)
+
     # Identity-only apps are the bulk of any inventory and are genuinely low
     # risk. Capping them is what keeps the report readable — unless the client
     # itself is unverifiable, which is worth a look on its own.
-    if max_weight == 0 and not app.is_anonymous:
+    if (
+        max_weight == 0
+        and not app.is_anonymous
+        and not app.tenant_wide_consent
+        and not app.has_application_permissions
+    ):
         score = min(score, MEDIUM_THRESHOLD - 1)
         reasons.append("Capped to low: sign-in only, no access to company data.")
 
@@ -219,6 +258,8 @@ def summarize_inventory(scored: list[tuple[DiscoveredApp, RiskAssessment]]) -> d
                 "score": a.score,
                 "band": a.band.value,
                 "users": app.install_count,
+                "tenant_wide": app.tenant_wide_consent,
+                "app_only": app.has_application_permissions,
             }
             for app, a in scored[:10]
         ],

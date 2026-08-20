@@ -8,7 +8,7 @@ import logging
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
-from ..connectors import GoogleWorkspaceConnector
+from ..connectors import build_connector, close_connector
 from ..connectors.base import AuthError, ConnectorError
 from ..models import Provider
 from ..services.scanner import ScanInProgress
@@ -22,27 +22,54 @@ router = APIRouter(prefix="/v1/tenants/{tenant_id}", tags=["inventory"])
 async def start_scan(
     background: BackgroundTasks,
     tenant_id: str = Depends(require_tenant),
+    provider: str | None = Query(None, pattern="^(google|microsoft)$"),
     context: AppContext = Depends(get_context),
 ) -> dict:
     """Kick off a discovery scan.
 
-    Returns immediately: a full-directory scan is minutes of API calls, and no
+    With no ``provider``, every provider this tenant has connected is scanned —
+    a customer with both Workspace and Entra wants one button, not two.
+
+    Returns immediately: a full Workspace scan is minutes of API calls, and no
     dashboard should hold an HTTP connection open for that. Poll
     ``GET /scans/latest`` for progress.
     """
-    if context.scans.is_running(tenant_id):
+    connected = await context.repo.list_connected_providers(tenant_id)
+    if not connected:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "This tenant has not connected a provider yet.",
+        )
+
+    if provider:
+        wanted = Provider(provider)
+        if wanted not in connected:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST, f"{provider} is not connected for this tenant"
+            )
+        targets = [wanted]
+    else:
+        targets = connected
+
+    started = [p for p in targets if not context.scans.is_running(tenant_id, p)]
+    if not started:
         raise HTTPException(status.HTTP_409_CONFLICT, "A scan is already running")
 
-    async def _run() -> None:
+    async def _run(target: Provider) -> None:
         try:
-            await context.scans.run_scan(tenant_id, Provider.GOOGLE, trigger_kind="manual")
+            await context.scans.run_scan(tenant_id, target, trigger_kind="manual")
         except ScanInProgress:
             pass
         except Exception:  # background tasks swallow exceptions otherwise
-            log.exception("Background scan for tenant %s failed", tenant_id)
+            log.exception("Background %s scan for tenant %s failed", target.value, tenant_id)
 
-    background.add_task(_run)
-    return {"status": "started", "tenant_id": tenant_id}
+    for target in started:
+        background.add_task(_run, target)
+    return {
+        "status": "started",
+        "tenant_id": tenant_id,
+        "providers": [p.value for p in started],
+    }
 
 
 @router.get("/scans/latest")
@@ -50,10 +77,25 @@ async def latest_scan(
     tenant_id: str = Depends(require_tenant),
     context: AppContext = Depends(get_context),
 ) -> dict:
+    """Most recent scan overall, plus one per provider.
+
+    Both are reported because a customer running Workspace and Entra needs to
+    see a stale or failing connection even when the other one just succeeded.
+    """
     scan = await context.repo.latest_scan(tenant_id)
+    per_provider = await context.repo.latest_scan_per_provider(tenant_id)
+    running = [
+        p.value for p in await context.repo.list_connected_providers(tenant_id)
+        if context.scans.is_running(tenant_id, p)
+    ]
     if scan is None:
-        return {"status": "never_scanned", "running": context.scans.is_running(tenant_id)}
-    return {**scan, "id": str(scan["id"]), "running": context.scans.is_running(tenant_id)}
+        return {"status": "never_scanned", "running": running, "by_provider": []}
+    return {
+        **scan,
+        "id": str(scan["id"]),
+        "running": running,
+        "by_provider": [{**s, "id": str(s["id"])} for s in per_provider],
+    }
 
 
 @router.get("/summary")
@@ -63,10 +105,13 @@ async def summary(
 ) -> dict:
     """The dashboard header: counts by band, plus the last scan."""
     counts = await context.repo.inventory_summary(tenant_id)
-    scan = await context.repo.latest_scan(tenant_id)
+    per_provider = await context.repo.latest_scan_per_provider(tenant_id)
     return {
         "counts": counts,
-        "last_scan": {**scan, "id": str(scan["id"])} if scan else None,
+        "connected_providers": [
+            p.value for p in await context.repo.list_connected_providers(tenant_id)
+        ],
+        "scans_by_provider": [{**s, "id": str(s["id"])} for s in per_provider],
     }
 
 
@@ -78,13 +123,14 @@ async def list_apps(
                                    pattern="^(new|approved|blocked|ignored)$"),
     category: str | None = Query(None, max_length=40),
     search: str | None = Query(None, max_length=100),
+    provider: str | None = Query(None, pattern="^(google|microsoft)$"),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
     context: AppContext = Depends(get_context),
 ) -> dict:
     apps = await context.repo.list_apps(
         tenant_id, band=band, status=app_status, category=category,
-        search=search, limit=limit, offset=offset,
+        search=search, provider=provider, limit=limit, offset=offset,
     )
     return {"apps": [{**a, "id": str(a["id"])} for a in apps], "count": len(apps)}
 
@@ -131,7 +177,6 @@ async def list_events(
 
 
 class RevokeRequest(BaseModel):
-    client_id: str = Field(min_length=1, max_length=300)
     user_emails: list[str] = Field(default_factory=list, max_length=500)
     reviewer: str = ""
     confirm: bool = False
@@ -144,11 +189,17 @@ async def revoke_app(
     tenant_id: str = Depends(require_tenant),
     context: AppContext = Depends(get_context),
 ) -> dict:
-    """Revoke a third-party app's tokens for the named users.
+    """Revoke a third-party app's access for the named principals.
 
     Destructive and not undoable — affected users lose access until they
-    re-consent — so it requires ``confirm: true`` and an explicit user list.
-    Never call this automatically from a scan.
+    re-consent — so it requires ``confirm: true`` and an explicit list. Never
+    call this automatically from a scan.
+
+    For Entra apps the list may contain the synthetic principals shown on the
+    app detail view: revoking "(all users — admin consent)" removes the
+    tenant-wide grant, and "(application — no user)" removes app-only
+    permissions. Those two need the optional write permissions on the app
+    registration; without them Graph answers 403 and this returns 400.
     """
     if not body.confirm:
         raise HTTPException(
@@ -158,25 +209,37 @@ async def revoke_app(
     if not body.user_emails:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "user_emails must not be empty")
 
+    # The app row is the authority on which provider to talk to — the caller
+    # should not have to know, and should not be able to redirect us.
+    app = await context.repo.get_app(tenant_id, app_id)
+    if app is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "App not found")
+    provider = Provider(app["provider"])
+
+    client_id, client_secret = context.settings.oauth_client(provider.value)
     creds = await context.repo.load_credentials(
-        tenant_id, Provider.GOOGLE,
-        client_id=context.settings.google_client_id,
-        client_secret=context.settings.google_client_secret,
+        tenant_id, provider, client_id=client_id, client_secret=client_secret
     )
     if creds is None:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Tenant has no active Google connection")
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, f"Tenant has no active {provider.value} connection"
+        )
 
-    connector = GoogleWorkspaceConnector(creds, concurrency=1)
-    revoked, failed = [], {}
-    for email in body.user_emails:
-        try:
-            await asyncio.to_thread(connector.revoke_grant, email, body.client_id)
-            revoked.append(email)
-        except AuthError as exc:
-            await context.repo.mark_credentials_broken(tenant_id, Provider.GOOGLE, str(exc))
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
-        except ConnectorError as exc:
-            failed[email] = str(exc)
+    connector = build_connector(creds, context.settings, concurrency=1)
+    revoked: list[str] = []
+    failed: dict[str, str] = {}
+    try:
+        for principal in body.user_emails:
+            try:
+                await asyncio.to_thread(connector.revoke_grant, principal, app["client_id"])
+                revoked.append(principal)
+            except AuthError as exc:
+                await context.repo.mark_credentials_broken(tenant_id, provider, str(exc))
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+            except ConnectorError as exc:
+                failed[principal] = str(exc)
+    finally:
+        close_connector(connector)
 
     await context.repo.set_app_status(tenant_id, app_id, "blocked", body.reviewer)
-    return {"revoked": revoked, "failed": failed}
+    return {"provider": provider.value, "revoked": revoked, "failed": failed}

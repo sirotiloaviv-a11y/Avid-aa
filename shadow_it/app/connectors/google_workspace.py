@@ -35,7 +35,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
-from typing import Iterable, Iterator
+from typing import Iterator
 
 from google.auth.exceptions import GoogleAuthError, RefreshError
 from google.oauth2 import service_account
@@ -322,26 +322,3 @@ def _first_reason(exc: HttpError) -> str:
     except (AttributeError, ValueError, KeyError):
         pass
     return ""
-
-
-def aggregate(grants: Iterable[AppGrant]) -> list:
-    """Collapse per-user grants into one row per client id.
-
-    Lives here rather than in the scanner so a connector's raw output can be
-    inspected on its own, which is what you want when a customer disputes a
-    finding.
-    """
-    from ..models import DiscoveredApp  # local import keeps the module graph flat
-
-    apps: dict[str, DiscoveredApp] = {}
-    for grant in grants:
-        app = apps.get(grant.client_id)
-        if app is None:
-            app = DiscoveredApp(
-                client_id=grant.client_id,
-                display_name=grant.display_name,
-                provider=Provider.GOOGLE,
-            )
-            apps[grant.client_id] = app
-        app.absorb(grant)
-    return list(apps.values())

@@ -42,23 +42,51 @@ class DirectoryUser:
     org_unit: str = ""
 
 
+# Microsoft has two grant shapes that have no per-user principal, so they get
+# synthetic ones. They are never real mailboxes, and ``absorb`` keeps them out
+# of the user count so "8 users" always means eight people.
+TENANT_WIDE_PRINCIPAL = "(all users — admin consent)"
+APPLICATION_PRINCIPAL = "(application — no user)"
+
+
+class GrantType(str, Enum):
+    """How an app came to hold its permissions.
+
+    Google only ever produces DELEGATED: a person clicked Allow. Entra ID adds
+    two shapes that are strictly worse, and the distinction drives the score:
+
+    * TENANT_WIDE — an admin consented on behalf of everyone. No employee opted
+      in and no employee can opt out.
+    * APPLICATION — app-only permissions. There is no user in the loop at all;
+      the app reads the tenant at 3am whether anyone is signed in or not.
+    """
+
+    DELEGATED = "delegated"
+    TENANT_WIDE = "tenant_wide"
+    APPLICATION = "application"
+
+
 @dataclass
 class AppGrant:
-    """One user having authorized one third-party app.
+    """One principal having authorized one third-party app.
 
-    This is the atomic fact the Admin SDK gives us: user X granted client Y
-    scopes Z. Everything else in the product is an aggregation of these.
+    This is the atomic fact a provider gives us: principal X granted client Y
+    scopes Z. Everything else in the product is an aggregation of these. The
+    principal is usually a person; for Entra's tenant-wide and app-only grants
+    it is one of the synthetic constants above.
     """
 
     client_id: str
     display_name: str
     user_email: str
     scopes: list[str] = field(default_factory=list)
-    # Google flags a client that is not registered in any Cloud project.
-    # Those are the ones nobody can vouch for — a strong Shadow IT signal.
+    # Google flags a client that is not registered in any Cloud project;
+    # Microsoft's equivalent is a service principal with no verified publisher.
+    # Either way: nobody can vouch for it — a strong Shadow IT signal.
     is_anonymous: bool = False
     is_native_app: bool = False
     user_is_admin: bool = False
+    grant_type: GrantType = GrantType.DELEGATED
     observed_at: datetime | None = None
 
 
@@ -71,6 +99,10 @@ class DiscoveredApp:
     provider: Provider = Provider.GOOGLE
     is_anonymous: bool = False
     is_native_app: bool = False
+    # Entra only: an admin consented for the whole directory, or the app holds
+    # app-only permissions that need no signed-in user.
+    tenant_wide_consent: bool = False
+    has_application_permissions: bool = False
     scopes: set[str] = field(default_factory=set)
     user_emails: set[str] = field(default_factory=set)
     admin_user_emails: set[str] = field(default_factory=set)
@@ -81,9 +113,18 @@ class DiscoveredApp:
 
     def absorb(self, grant: AppGrant) -> None:
         self.scopes.update(grant.scopes)
-        self.user_emails.add(grant.user_email)
-        if grant.user_is_admin:
-            self.admin_user_emails.add(grant.user_email)
+        if grant.grant_type is GrantType.TENANT_WIDE:
+            self.tenant_wide_consent = True
+        elif grant.grant_type is GrantType.APPLICATION:
+            self.has_application_permissions = True
+        else:
+            # Only real people count towards install_count; a tenant-wide
+            # consent is one grant row but affects everybody, and an app-only
+            # grant affects nobody in particular. Folding either into the user
+            # set would make the number meaningless.
+            self.user_emails.add(grant.user_email)
+            if grant.user_is_admin:
+                self.admin_user_emails.add(grant.user_email)
         # Any single anonymous/native observation applies to the client itself.
         self.is_anonymous = self.is_anonymous or grant.is_anonymous
         self.is_native_app = self.is_native_app or grant.is_native_app

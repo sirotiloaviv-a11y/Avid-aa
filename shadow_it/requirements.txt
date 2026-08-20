@@ -9,10 +9,12 @@ asyncpg>=0.29,<1.0
 # Secrets at rest
 cryptography>=43.0
 
-# Google Workspace Admin SDK
+# HTTP. Also the entire Microsoft 365 connector's dependency surface: Graph is
+# plain REST + OAuth2 client credentials, so no vendor SDK is needed there.
+httpx>=0.27,<1.0
+
+# Google Workspace Admin SDK. Only needed for the Google connector — it is
+# imported lazily, so a Microsoft-only deployment can drop these three.
 google-api-python-client>=2.140,<3.0
 google-auth>=2.34,<3.0
 requests>=2.32,<3.0   # google.auth.transport.requests, for id_token verification
-
-# OAuth token exchange
-httpx>=0.27,<1.0

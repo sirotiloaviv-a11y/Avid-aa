@@ -74,6 +74,13 @@ class Settings:
     google_client_id: str = ""
     google_client_secret: str = ""
 
+    # --- Microsoft 365 / Entra ID app registration -----------------------
+    # A single multi-tenant registration; customers admin-consent to it and we
+    # then use client credentials against *their* tenant id. There is no
+    # per-tenant secret to store, which is one less thing to leak.
+    microsoft_client_id: str = ""
+    microsoft_client_secret: str = ""
+
     # --- Scanning --------------------------------------------------------
     # Admin SDK is rate limited per project; 8 parallel users is comfortably
     # inside the default quota and still scans ~1000 users in a few minutes.
@@ -85,6 +92,17 @@ class Settings:
     def dsn(self) -> str:
         return self.database_url
 
+    def oauth_client(self, provider: str) -> tuple[str, str]:
+        """The (client_id, client_secret) of *our* app registration for a provider."""
+        if provider == "microsoft":
+            return self.microsoft_client_id, self.microsoft_client_secret
+        return self.google_client_id, self.google_client_secret
+
+    @property
+    def enabled_providers(self) -> list[str]:
+        """Providers this deployment is configured to onboard."""
+        return [p for p in ("google", "microsoft") if all(self.oauth_client(p))]
+
     def validate(self) -> list[str]:
         """Return a list of fatal misconfigurations (empty means good to go)."""
         problems: list[str] = []
@@ -94,10 +112,13 @@ class Settings:
             problems.append("API_KEY is required — it guards every /v1 endpoint.")
         if not self.database_url:
             problems.append("DATABASE_URL is required.")
-        if not (self.google_client_id and self.google_client_secret):
+        if not self.enabled_providers:
+            # One provider is enough to run the product; zero means no customer
+            # can connect anything, which is a misconfiguration, not a choice.
             problems.append(
-                "GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET are required for the "
-                "Google Workspace connector."
+                "Configure at least one provider: GOOGLE_CLIENT_ID/"
+                "GOOGLE_CLIENT_SECRET for Google Workspace, or "
+                "MICROSOFT_CLIENT_ID/MICROSOFT_CLIENT_SECRET for Microsoft 365."
             )
         return problems
 
@@ -119,6 +140,8 @@ def load_settings(env_file: Path | None = None) -> Settings:
         api_key=os.getenv("API_KEY", ""),
         google_client_id=os.getenv("GOOGLE_CLIENT_ID", ""),
         google_client_secret=os.getenv("GOOGLE_CLIENT_SECRET", ""),
+        microsoft_client_id=os.getenv("MICROSOFT_CLIENT_ID", ""),
+        microsoft_client_secret=os.getenv("MICROSOFT_CLIENT_SECRET", ""),
         scan_concurrency=_env_int("SCAN_CONCURRENCY", 8),
         scan_max_users=_env_int("SCAN_MAX_USERS", 0),
         scan_interval_hours=_env_int("SCAN_INTERVAL_HOURS", 24),

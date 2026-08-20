@@ -8,9 +8,14 @@ Sequence, and why it is this order:
 Directory size is written before scoring because the risk engine reads "12
 users" differently at a 40-person startup than at a 4,000-person company.
 
-The Google client is synchronous and thread-based, so the whole connector leg
-runs in a worker thread. FastAPI's event loop stays free to serve the
-dashboard while a 2,000-seat scan grinds through tokens.list.
+Both connectors are synchronous, so the whole connector leg runs in a worker
+thread. FastAPI's event loop stays free to serve the dashboard while a
+2,000-seat Workspace scan grinds through tokens.list.
+
+The two providers cost wildly different amounts for the same answer — Google is
+one API call per employee, Entra is a handful of directory-wide reads — but
+that difference is entirely inside the connector. From here they are the same
+four steps.
 """
 
 from __future__ import annotations
@@ -20,7 +25,7 @@ import logging
 from datetime import datetime, timezone
 
 from ..config import Settings
-from ..connectors import GoogleWorkspaceConnector, aggregate
+from ..connectors import aggregate, build_connector, close_connector
 from ..connectors.base import AuthError, ConnectorError
 from ..models import Provider, ScanResult
 from ..risk import assess_all
@@ -49,18 +54,26 @@ class ScanService:
         provider: Provider = Provider.GOOGLE,
         trigger_kind: str = "manual",
     ) -> ScanResult:
+        # Keyed by tenant *and* provider: a customer running both Workspace and
+        # Entra should be able to scan them at the same time, and one slow
+        # Workspace scan must not block the cheap Entra one behind it.
+        key = f"{tenant_id}:{provider.value}"
         async with self._lock:
-            if tenant_id in self._running:
-                raise ScanInProgress(f"A scan is already running for tenant {tenant_id}")
-            self._running.add(tenant_id)
+            if key in self._running:
+                raise ScanInProgress(
+                    f"A {provider.value} scan is already running for tenant {tenant_id}"
+                )
+            self._running.add(key)
         try:
             return await self._run(tenant_id, provider, trigger_kind)
         finally:
             async with self._lock:
-                self._running.discard(tenant_id)
+                self._running.discard(key)
 
-    def is_running(self, tenant_id: str) -> bool:
-        return tenant_id in self._running
+    def is_running(self, tenant_id: str, provider: Provider | None = None) -> bool:
+        if provider is not None:
+            return f"{tenant_id}:{provider.value}" in self._running
+        return any(key.startswith(f"{tenant_id}:") for key in self._running)
 
     # ------------------------------------------------------------------
     async def _run(self, tenant_id: str, provider: Provider, trigger_kind: str) -> ScanResult:
@@ -68,29 +81,29 @@ class ScanService:
         started_at = datetime.now(timezone.utc)
         scan_id = await self._repo.start_scan(tenant_id, provider, trigger_kind)
 
+        client_id, client_secret = self._settings.oauth_client(provider.value)
         credentials = await self._repo.load_credentials(
-            tenant_id,
-            provider,
-            client_id=self._settings.google_client_id,
-            client_secret=self._settings.google_client_secret,
+            tenant_id, provider, client_id=client_id, client_secret=client_secret
         )
         if credentials is None:
             await self._repo.finish_scan(
-                scan_id, "failed", errors=["No active credentials — tenant must connect first."]
+                scan_id,
+                "failed",
+                errors=[f"No active {provider.value} credentials — tenant must connect first."],
             )
-            result.errors.append("No active credentials for this tenant.")
+            result.errors.append(f"No active {provider.value} credentials for this tenant.")
             return result
 
+        connector = None
         try:
-            connector = GoogleWorkspaceConnector(
-                credentials,
-                concurrency=self._settings.scan_concurrency,
-                max_users=self._settings.scan_max_users,
-            )
+            connector = build_connector(credentials, self._settings)
 
             # --- 1. directory ------------------------------------------
             users = await asyncio.to_thread(lambda: list(connector.list_users()))
-            log.info("Tenant %s: %d users to scan", tenant_id, len(users))
+            log.info(
+                "Tenant %s (%s): %d users in the directory",
+                tenant_id, provider.value, len(users),
+            )
             user_ids = await self._repo.upsert_users(tenant_id, users, provider)
             await self._repo.set_directory_size(tenant_id, len(users))
             result.users_scanned = len(users)
@@ -101,7 +114,7 @@ class ScanService:
             result.errors.extend(report.errors)
 
             # --- 3. aggregate and score --------------------------------
-            apps = aggregate(report.grants)
+            apps = aggregate(report.grants, provider)
             policy = await self._repo.load_policy(tenant_id)
             scored = assess_all(apps, policy)
             result.apps_found = len(scored)
@@ -134,12 +147,15 @@ class ScanService:
             result.errors.append(str(exc))
             return result
         except ConnectorError as exc:
-            log.exception("Tenant %s scan failed", tenant_id)
+            log.exception("Tenant %s %s scan failed", tenant_id, provider.value)
             await self._repo.finish_scan(
                 scan_id, "failed", users_scanned=result.users_scanned, errors=[str(exc)]
             )
             result.errors.append(str(exc))
             return result
+        finally:
+            if connector is not None:
+                close_connector(connector)
 
         status = "partial" if result.errors else "success"
         await self._repo.finish_scan(
@@ -152,9 +168,9 @@ class ScanService:
             errors=result.errors[:50],
         )
         log.info(
-            "Tenant %s scan %s: %d users, %d grants, %d apps (%d new)",
-            tenant_id, status, result.users_scanned, result.grants_found,
-            result.apps_found, result.new_apps,
+            "Tenant %s %s scan %s: %d users, %d grants, %d apps (%d new)",
+            tenant_id, provider.value, status, result.users_scanned,
+            result.grants_found, result.apps_found, result.new_apps,
         )
         return result
 
@@ -195,12 +211,20 @@ class Scheduler:
             try:
                 for tenant in await self._repo.list_tenants(active_only=True):
                     tenant_id = str(tenant["id"])
-                    if self._scans.is_running(tenant_id):
-                        continue
-                    try:
-                        await self._scans.run_scan(tenant_id, trigger_kind="scheduled")
-                    except (ScanInProgress, ConnectorError) as exc:
-                        log.warning("Scheduled scan for %s skipped: %s", tenant_id, exc)
+                    # A customer can have Workspace and Entra connected at once
+                    # (an acquisition is the usual reason); scan both.
+                    for provider in await self._repo.list_connected_providers(tenant_id):
+                        if self._scans.is_running(tenant_id, provider):
+                            continue
+                        try:
+                            await self._scans.run_scan(
+                                tenant_id, provider, trigger_kind="scheduled"
+                            )
+                        except (ScanInProgress, ConnectorError) as exc:
+                            log.warning(
+                                "Scheduled %s scan for %s skipped: %s",
+                                provider.value, tenant_id, exc,
+                            )
             except asyncio.CancelledError:
                 raise
             except Exception:  # a scheduler that dies silently is worse than a noisy one

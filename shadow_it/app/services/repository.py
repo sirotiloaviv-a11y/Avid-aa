@@ -131,6 +131,18 @@ class Repository:
             return None
 
         secret = self._secrets.decrypt(row["secret_ciphertext"])
+
+        if row["method"] == "client_credentials":
+            # Microsoft: the stored secret is the customer's Entra tenant id.
+            # It is not sensitive on its own — our client secret, which is, only
+            # ever lives in the process environment.
+            return TenantCredentials(
+                provider=provider,
+                admin_email=row["admin_email"],
+                directory_tenant_id=secret,
+                client_id=client_id,
+                client_secret=client_secret,
+            )
         if row["method"] == "service_account":
             return TenantCredentials(
                 provider=provider,
@@ -146,6 +158,23 @@ class Repository:
             client_secret=client_secret,
             customer_id=row["customer_id"],
         )
+
+    async def list_connected_providers(self, tenant_id: str) -> list[Provider]:
+        """Providers this tenant has a live connection for.
+
+        A customer can run both at once — Workspace for the company and Entra
+        for an acquired subsidiary is a normal shape — so the scheduler scans
+        every connected provider, not just the first.
+        """
+        rows = await self._pool.fetch(
+            """
+            SELECT provider FROM tenant_credentials
+             WHERE tenant_id = $1 AND status = 'active'
+             ORDER BY provider
+            """,
+            tenant_id,
+        )
+        return [Provider(r["provider"]) for r in rows]
 
     async def mark_credentials_broken(
         self, tenant_id: str, provider: Provider, error: str
@@ -254,17 +283,38 @@ class Repository:
             json.dumps(errors or []),
         )
 
-    async def latest_scan(self, tenant_id: str) -> dict | None:
+    async def latest_scan(self, tenant_id: str, provider: Provider | None = None) -> dict | None:
         row = await self._pool.fetchrow(
             """
-            SELECT id, status, trigger_kind, users_scanned, grants_found, apps_found,
-                   new_apps, errors, started_at, finished_at
-              FROM scans WHERE tenant_id = $1
+            SELECT id, provider, status, trigger_kind, users_scanned, grants_found,
+                   apps_found, new_apps, errors, started_at, finished_at
+              FROM scans
+             WHERE tenant_id = $1
+               AND ($2::provider_kind IS NULL OR provider = $2::provider_kind)
              ORDER BY started_at DESC LIMIT 1
+            """,
+            tenant_id, provider.value if provider else None,
+        )
+        return dict(row) if row else None
+
+    async def latest_scan_per_provider(self, tenant_id: str) -> list[dict]:
+        """Most recent scan for each connected provider.
+
+        A single "last scan" is misleading once a customer runs both: a fresh
+        Entra scan would hide a Workspace connection that has been failing for
+        a week.
+        """
+        rows = await self._pool.fetch(
+            """
+            SELECT DISTINCT ON (provider)
+                   id, provider, status, trigger_kind, users_scanned, grants_found,
+                   apps_found, new_apps, errors, started_at, finished_at
+              FROM scans WHERE tenant_id = $1
+             ORDER BY provider, started_at DESC
             """,
             tenant_id,
         )
-        return dict(row) if row else None
+        return [dict(r) for r in rows]
 
     # --------------------------------------------------------------- apps
     async def upsert_app(
@@ -285,7 +335,8 @@ class Repository:
             async with conn.transaction():
                 previous = await conn.fetchrow(
                     """
-                    SELECT id, scopes, risk_score, risk_band, user_count, status
+                    SELECT id, scopes, risk_score, risk_band, user_count, status,
+                           tenant_wide_consent, has_application_permissions
                       FROM discovered_apps
                      WHERE tenant_id = $1 AND provider = $2 AND client_id = $3
                      FOR UPDATE
@@ -297,14 +348,18 @@ class Repository:
                     """
                     INSERT INTO discovered_apps
                         (tenant_id, provider, client_id, display_name, is_anonymous,
-                         is_native_app, category, scopes, user_count, admin_count,
+                         is_native_app, tenant_wide_consent, has_application_permissions,
+                         category, scopes, user_count, admin_count,
                          risk_score, risk_band, risk_reasons, capabilities)
                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
-                            $13::jsonb, $14::jsonb)
+                            $13, $14, $15::jsonb, $16::jsonb)
                     ON CONFLICT (tenant_id, provider, client_id) DO UPDATE
                         SET display_name  = EXCLUDED.display_name,
                             is_anonymous  = EXCLUDED.is_anonymous,
                             is_native_app = EXCLUDED.is_native_app,
+                            tenant_wide_consent = EXCLUDED.tenant_wide_consent,
+                            has_application_permissions =
+                                EXCLUDED.has_application_permissions,
                             category      = EXCLUDED.category,
                             scopes        = EXCLUDED.scopes,
                             user_count    = EXCLUDED.user_count,
@@ -317,7 +372,8 @@ class Repository:
                     RETURNING id
                     """,
                     tenant_id, app.provider.value, app.client_id, app.display_name,
-                    app.is_anonymous, app.is_native_app, assessment.category, scopes,
+                    app.is_anonymous, app.is_native_app, app.tenant_wide_consent,
+                    app.has_application_permissions, assessment.category, scopes,
                     app.install_count, len(app.admin_user_emails), assessment.score,
                     assessment.band.value, json.dumps(assessment.reasons),
                     json.dumps(assessment.capabilities),
@@ -346,15 +402,20 @@ class Repository:
         if not grants:
             return
         records = [
-            (tenant_id, app_id, user_ids.get(g.user_email.lower()), g.user_email, sorted(g.scopes))
+            (
+                tenant_id, app_id, user_ids.get(g.user_email.lower()), g.user_email,
+                g.grant_type.value, sorted(g.scopes),
+            )
             for g in grants
         ]
         await self._pool.executemany(
             """
-            INSERT INTO app_grants (tenant_id, app_id, user_id, user_email, scopes)
-            VALUES ($1, $2, $3, $4, $5)
+            INSERT INTO app_grants
+                (tenant_id, app_id, user_id, user_email, grant_type, scopes)
+            VALUES ($1, $2, $3, $4, $5, $6)
             ON CONFLICT (tenant_id, app_id, lower(user_email)) DO UPDATE
                 SET scopes = EXCLUDED.scopes,
+                    grant_type = EXCLUDED.grant_type,
                     user_id = COALESCE(EXCLUDED.user_id, app_grants.user_id),
                     last_seen_at = now(),
                     revoked_at = NULL
@@ -388,24 +449,27 @@ class Repository:
         status: str | None = None,
         category: str | None = None,
         search: str | None = None,
+        provider: str | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> list[dict]:
         rows = await self._pool.fetch(
             """
-            SELECT id, client_id, display_name, category, risk_score, risk_band,
-                   risk_reasons, capabilities, scopes, user_count, admin_count,
-                   is_anonymous, is_native_app, status, first_seen_at, last_seen_at
+            SELECT id, provider, client_id, display_name, category, risk_score,
+                   risk_band, risk_reasons, capabilities, scopes, user_count,
+                   admin_count, is_anonymous, is_native_app, tenant_wide_consent,
+                   has_application_permissions, status, first_seen_at, last_seen_at
               FROM discovered_apps
              WHERE tenant_id = $1
                AND ($2::risk_band  IS NULL OR risk_band = $2::risk_band)
                AND ($3::app_status IS NULL OR status = $3::app_status)
                AND ($4::text       IS NULL OR category = $4)
                AND ($5::text       IS NULL OR display_name ILIKE '%' || $5 || '%')
+               AND ($6::provider_kind IS NULL OR provider = $6::provider_kind)
              ORDER BY risk_score DESC, display_name
-             LIMIT $6 OFFSET $7
+             LIMIT $7 OFFSET $8
             """,
-            tenant_id, band, status, category, search, limit, offset,
+            tenant_id, band, status, category, search, provider, limit, offset,
         )
         return [dict(r) for r in rows]
 
@@ -416,6 +480,7 @@ class Repository:
                    COALESCE(
                        (SELECT json_agg(json_build_object(
                             'user_email', g.user_email,
+                            'grant_type', g.grant_type,
                             'scopes', g.scopes,
                             'first_seen_at', g.first_seen_at,
                             'revoked_at', g.revoked_at))
@@ -450,7 +515,9 @@ class Repository:
                    COUNT(*) FILTER (WHERE risk_band = 'medium')        AS medium,
                    COUNT(*) FILTER (WHERE risk_band = 'low')           AS low,
                    COUNT(*) FILTER (WHERE status = 'new')              AS unreviewed,
-                   COUNT(*) FILTER (WHERE is_anonymous)                AS unverified_publisher
+                   COUNT(*) FILTER (WHERE is_anonymous)                AS unverified_publisher,
+                   COUNT(*) FILTER (WHERE tenant_wide_consent)         AS tenant_wide,
+                   COUNT(*) FILTER (WHERE has_application_permissions) AS app_only
               FROM discovered_apps WHERE tenant_id = $1
             """,
             tenant_id,
@@ -543,5 +610,21 @@ def _diff_events(
             "user_added",
             f"{app.display_name} authorized by {added_users} more user(s)",
             {"total_users": app.install_count},
+        ))
+
+    # Entra escalations. Either of these turns a one-employee app into a
+    # tenant-wide one overnight, and neither shows up as a scope or user
+    # change — so without their own events they would land silently.
+    if app.tenant_wide_consent and not previous["tenant_wide_consent"]:
+        events.append((
+            "tenant_wide_consent_granted",
+            f"{app.display_name} was admin-consented for the entire directory",
+            {"at": now},
+        ))
+    if app.has_application_permissions and not previous["has_application_permissions"]:
+        events.append((
+            "application_permissions_granted",
+            f"{app.display_name} gained app-only permissions (works with no user signed in)",
+            {"at": now, "scopes": scopes},
         ))
     return events

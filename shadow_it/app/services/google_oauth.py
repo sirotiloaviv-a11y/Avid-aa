@@ -1,7 +1,7 @@
 """Admin-consent flow: how a customer connects their Workspace in 60 seconds.
 
-    GET  /v1/connect/google        -> redirect the admin to Google
-    GET  /v1/connect/google/callback -> exchange the code, store the refresh token
+    GET /v1/connect/google/start/{tenant_id} -> the consent URL for the admin
+    GET /v1/connect/google/callback          -> exchange the code, store the token
 
 Security properties this flow depends on, none of them optional:
 
@@ -22,13 +22,7 @@ over-broad ask is the fastest way to lose a security sale.
 
 from __future__ import annotations
 
-import base64
-import hashlib
-import hmac
-import json
 import logging
-import secrets
-import time
 from dataclasses import dataclass
 
 import httpx
@@ -36,6 +30,7 @@ from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token as google_id_token
 
 from ..connectors.google_workspace import REQUIRED_SCOPES
+from ..oauth_state import STATE_TTL_SECONDS, OAuthError, make_state, verify_state
 
 log = logging.getLogger(__name__)
 
@@ -45,11 +40,18 @@ TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
 # openid/email only identify the admin who consented; they grant no data access.
 CONSENT_SCOPES: tuple[str, ...] = ("openid", "email", *REQUIRED_SCOPES)
 
-STATE_TTL_SECONDS = 600
-
-
-class OAuthError(RuntimeError):
-    """The consent flow failed in a way the admin needs to see."""
+# Re-exported so a caller can treat this module as the whole Google flow.
+__all__ = [
+    "CONSENT_SCOPES",
+    "ConnectedAdmin",
+    "OAuthError",
+    "STATE_TTL_SECONDS",
+    "build_authorize_url",
+    "exchange_code",
+    "make_state",
+    "revoke_refresh_token",
+    "verify_state",
+]
 
 
 @dataclass(frozen=True)
@@ -58,38 +60,6 @@ class ConnectedAdmin:
     hosted_domain: str
     refresh_token: str
     granted_scopes: tuple[str, ...]
-
-
-# ----------------------------------------------------------------- state ---
-def _sign(payload: bytes, secret: str) -> str:
-    digest = hmac.new(secret.encode(), payload, hashlib.sha256).digest()
-    return base64.urlsafe_b64encode(digest).decode().rstrip("=")
-
-
-def make_state(tenant_id: str, secret: str) -> str:
-    payload = json.dumps(
-        {"t": tenant_id, "n": secrets.token_urlsafe(12), "ts": int(time.time())},
-        separators=(",", ":"),
-    ).encode()
-    body = base64.urlsafe_b64encode(payload).decode().rstrip("=")
-    return f"{body}.{_sign(payload, secret)}"
-
-
-def verify_state(state: str, secret: str) -> str:
-    """Return the tenant_id carried by a valid state, else raise."""
-    try:
-        body, signature = state.split(".", 1)
-        payload = base64.urlsafe_b64decode(body + "=" * (-len(body) % 4))
-    except (ValueError, TypeError) as exc:
-        raise OAuthError("Malformed OAuth state") from exc
-
-    if not hmac.compare_digest(_sign(payload, secret), signature):
-        raise OAuthError("OAuth state signature mismatch — possible CSRF attempt")
-
-    data = json.loads(payload)
-    if time.time() - float(data.get("ts", 0)) > STATE_TTL_SECONDS:
-        raise OAuthError("OAuth state expired — start the connection again")
-    return str(data["t"])
 
 
 # ------------------------------------------------------------------ flow ---

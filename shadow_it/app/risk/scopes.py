@@ -96,36 +96,81 @@ GOOGLE_SCOPE_PREFIXES: tuple[tuple[str, ScopeInfo], ...] = (
 )
 
 # Microsoft Graph, for the M365 connector. Graph permissions are already
-# human-readable, and the ``.All`` suffix is the tenant-wide tell.
+# human-readable, and the ``.All`` suffix is the tenant-wide tell: Mail.Read is
+# one mailbox, Mail.Read.All is every mailbox in the company.
+#
+# One caveat worth knowing: the *same* permission name is worth more as an
+# application permission than as a delegated one, because app-only access needs
+# no signed-in user. The engine handles that difference, not this table.
 MICROSOFT_SCOPES: dict[str, ScopeInfo] = {
-    "Directory.ReadWrite.All": ScopeInfo(10, "Full directory write", True),
-    "Directory.Read.All": ScopeInfo(8, "Read the whole directory"),
-    "Mail.ReadWrite": ScopeInfo(9, "Read and write mailbox", True),
-    "Mail.Read": ScopeInfo(8, "Read mailbox"),
-    "Mail.Send": ScopeInfo(7, "Send mail as the user", True),
-    "Files.ReadWrite.All": ScopeInfo(10, "Read and write all files", True),
-    "Files.Read.All": ScopeInfo(8, "Read all files"),
-    "Sites.ReadWrite.All": ScopeInfo(9, "Read and write all SharePoint sites", True),
+    # --- Identity only ----------------------------------------------------
     "User.Read": ScopeInfo(0, "Sign-in identity"),
-    "offline_access": ScopeInfo(1, "Long-lived refresh token"),
     "openid": ScopeInfo(0, "Sign-in identity"),
     "email": ScopeInfo(0, "Email address"),
     "profile": ScopeInfo(0, "Basic profile"),
+    "offline_access": ScopeInfo(1, "Long-lived refresh token"),
+    # --- Directory and tenant control: nothing above this -----------------
+    "Directory.ReadWrite.All": ScopeInfo(10, "Full directory write", True),
+    "Directory.Read.All": ScopeInfo(8, "Read the whole directory"),
+    "RoleManagement.ReadWrite.Directory": ScopeInfo(10, "Assign directory roles", True),
+    "AppRoleAssignment.ReadWrite.All": ScopeInfo(10, "Grant itself any permission", True),
+    "Application.ReadWrite.All": ScopeInfo(10, "Create and modify app registrations", True),
+    "Policy.ReadWrite.ConditionalAccess": ScopeInfo(10, "Rewrite conditional access", True),
+    "User.ReadWrite.All": ScopeInfo(9, "Create and modify every user", True),
+    "User.Read.All": ScopeInfo(7, "Read every user profile"),
+    "Group.ReadWrite.All": ScopeInfo(8, "Manage all groups and membership", True),
+    "DeviceManagementConfiguration.ReadWrite.All": ScopeInfo(9, "Rewrite Intune policy", True),
+    "AuditLog.Read.All": ScopeInfo(7, "Read sign-in and audit logs"),
+    # --- Mail -------------------------------------------------------------
+    "Mail.ReadWrite": ScopeInfo(9, "Read and write mailbox", True),
+    "Mail.ReadWrite.All": ScopeInfo(10, "Read and write every mailbox", True),
+    "Mail.Read": ScopeInfo(8, "Read mailbox"),
+    "Mail.Read.All": ScopeInfo(10, "Read every mailbox in the tenant"),
+    "Mail.Send": ScopeInfo(7, "Send mail as the user", True),
+    "MailboxSettings.ReadWrite": ScopeInfo(9, "Change forwarding and rules", True),
+    "full_access_as_app": ScopeInfo(10, "Full access to every mailbox (EWS)", True),
+    # --- Files and sites --------------------------------------------------
+    "Files.ReadWrite.All": ScopeInfo(10, "Read and write all files", True),
+    "Files.Read.All": ScopeInfo(8, "Read all files"),
+    "Files.ReadWrite": ScopeInfo(7, "Read and write the user's files", True),
+    "Sites.FullControl.All": ScopeInfo(10, "Full control of all SharePoint sites", True),
+    "Sites.ReadWrite.All": ScopeInfo(9, "Read and write all SharePoint sites", True),
+    "Sites.Read.All": ScopeInfo(8, "Read all SharePoint sites"),
+    # --- Teams, calendar, contacts ---------------------------------------
+    "Chat.Read.All": ScopeInfo(9, "Read every Teams chat"),
+    "ChannelMessage.Read.All": ScopeInfo(9, "Read every Teams channel message"),
+    "Calendars.ReadWrite": ScopeInfo(6, "Read and write calendars", True),
+    "Calendars.Read": ScopeInfo(5, "Read calendars, including attendees"),
+    "Contacts.Read": ScopeInfo(6, "Read contacts"),
+    "People.Read.All": ScopeInfo(6, "Read the relationship graph"),
 }
 
 MICROSOFT_SCOPE_PREFIXES: tuple[tuple[str, ScopeInfo], ...] = (
     ("Directory.", ScopeInfo(9, "Directory access", True)),
     ("RoleManagement.", ScopeInfo(10, "Role assignment", True)),
+    ("AppRoleAssignment.", ScopeInfo(10, "Permission granting", True)),
     ("Application.", ScopeInfo(10, "App registration control", True)),
+    ("Policy.", ScopeInfo(9, "Tenant policy control", True)),
+    ("DeviceManagement", ScopeInfo(8, "Intune device management", True)),
     ("Mail.", ScopeInfo(8, "Mailbox access", True)),
+    ("MailboxSettings.", ScopeInfo(8, "Mailbox settings", True)),
     ("Files.", ScopeInfo(8, "File access", True)),
     ("Sites.", ScopeInfo(8, "SharePoint access", True)),
     ("Chat.", ScopeInfo(7, "Teams chat access", True)),
+    ("ChannelMessage.", ScopeInfo(8, "Teams channel messages", True)),
+    ("Team", ScopeInfo(7, "Teams access", True)),
+    ("Group.", ScopeInfo(7, "Group access", True)),
+    ("User.", ScopeInfo(6, "User profile access", True)),
     ("Calendars.", ScopeInfo(5, "Calendar access", True)),
     ("Contacts.", ScopeInfo(6, "Contacts access", True)),
 )
 
 _READ_ONLY_HINTS = (".readonly", ".read", "_read", ".metadata.readonly")
+
+# Graph suffix meaning "every object of this type in the tenant", not just the
+# signed-in user's. It is the single most important modifier in a Graph
+# permission name, so a prefix match must not lose it.
+_MICROSOFT_TENANT_WIDE_SUFFIX = ".All"
 
 
 def describe_scope(scope: str, provider: str = "google") -> ScopeInfo:
@@ -149,6 +194,11 @@ def describe_scope(scope: str, provider: str = "google") -> ScopeInfo:
         if scope.startswith(prefix) and len(prefix) > best_len:
             best, best_len = info, len(prefix)
     if best is not None:
+        if provider == "microsoft" and scope.endswith(_MICROSOFT_TENANT_WIDE_SUFFIX):
+            # Mail.Read is one mailbox; Mail.Read.All is the whole company.
+            return ScopeInfo(
+                min(10, best.weight + 1), best.capability + " (tenant-wide)", best.writes
+            )
         if any(hint in scope.lower() for hint in _READ_ONLY_HINTS):
             return ScopeInfo(max(0, best.weight - 1), best.capability + " (read-only)", False)
         return best

@@ -66,7 +66,11 @@ async def lifespan(app: FastAPI):
     context, scheduler = await build_context(config)
     app.state.context = context
     scheduler.start()
-    log.info("Shadow IT discovery API ready on %s", config.public_base_url)
+    log.info(
+        "Shadow IT discovery API ready on %s (providers: %s)",
+        config.public_base_url,
+        ", ".join(config.enabled_providers) or "none",
+    )
     try:
         yield
     finally:
