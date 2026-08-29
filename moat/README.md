@@ -110,6 +110,25 @@ Full catalogue: `moat --list-rules`.
 
 ---
 
+## A report you can send someone
+
+```bash
+moat . --format html -o report.html
+```
+
+One self-contained file: no server, no build step, and **no network request when
+it is opened** — a security report gets forwarded and opened on machines that
+are not yours, so it has no business phoning a font CDN. It opens with the
+capability chain for every principal drawn out, then the findings, filterable by
+severity and text.
+
+The report renders strings that came out of configuration files, and a poisoned
+tool description is exactly what `MOAT-INJECT-002` exists to find — so every
+value is escaped at the boundary, hidden Unicode is rendered as a visible name
+rather than passed through, and the page's script never writes markup. A scanner
+that turned a finding into an exploit against the person reading the report
+would be worse than no scanner.
+
 ## In CI
 
 moat emits SARIF, so findings land as annotations on the pull request rather
@@ -134,7 +153,7 @@ Fingerprints exclude line numbers, so reformatting a config does not resurrect
 findings your team already triaged.
 
 ```
-moat [PATH] [--format text|json|sarif] [-o FILE] [--fail-on LEVEL]
+moat [PATH] [--format text|json|sarif|html] [-o FILE] [--fail-on LEVEL]
             [--min-severity LEVEL] [--baseline FILE] [--write-baseline FILE]
             [--disable RULE] [--exclude GLOB] [--list-rules]
 ```
@@ -205,7 +224,7 @@ trifecta analysis does.
 ## Tests
 
 ```bash
-python -m unittest discover -s tests -t . -v    # 114 tests, no dependencies
+python -m unittest discover -s tests -t . -v    # 136 tests, no dependencies
 ```
 
 ## License

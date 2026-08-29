@@ -52,6 +52,14 @@ class TestExitCodes(ProjectTestCase):
         _, out = self.run_cli("--format", "json")
         self.assertEqual(json.loads(out)["tool"], "moat")
 
+    def test_html_output_is_a_standalone_document(self):
+        destination = self.root / "report.html"
+        with redirect_stdout(io.StringIO()):
+            main([str(self.root), "--format", "html", "-o", str(destination)])
+        page = destination.read_text()
+        self.assertTrue(page.lstrip().startswith("<!doctype html>"))
+        self.assertIn("Agent configuration report", page)
+
     def test_output_file_receives_the_report(self):
         destination = self.root / "report.sarif"
         with redirect_stdout(io.StringIO()):

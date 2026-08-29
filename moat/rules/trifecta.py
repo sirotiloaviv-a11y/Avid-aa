@@ -272,5 +272,10 @@ def lethal_trifecta(targets: list[Target]) -> Iterator[Finding]:
                     "the loop."
                 ),
                 evidence=", ".join(f"{cap}={tool}" for cap, tool in proof.items()),
-                meta={"principal": entry["name"], "capabilities": held.names, "missing": missing},
+                meta={
+                    "principal": entry["name"],
+                    "capabilities": held.names,
+                    "witnesses": proof,
+                    "missing": missing,
+                },
             )

@@ -13,7 +13,8 @@ data-exfiltration paths that no single line of config reveals.
 python -m moat .
 ```
 
-No dependencies. Emits SARIF for GitHub code scanning.
+No dependencies. Emits SARIF for GitHub code scanning, or a self-contained
+HTML report you can send to someone.
 [Full documentation →](moat/README.md)
 
 ## [`security_alert_system/`](security_alert_system/README.md) — Hebrew security-alert monitor

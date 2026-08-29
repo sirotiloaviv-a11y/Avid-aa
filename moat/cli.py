@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 from .models import Severity
-from .reporters import render_json, render_sarif, render_terminal
+from .reporters import render_html, render_json, render_sarif, render_terminal
 from .rules import load_all, load_project_rules
 from .scanner import scan
 from .version import __version__
@@ -31,7 +31,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("path", nargs="?", default=".", help="file or directory to scan (default: .)")
     parser.add_argument(
-        "--format", choices=("text", "json", "sarif"), default="text", help="output format"
+        "--format",
+        choices=("text", "json", "sarif", "html"),
+        default="text",
+        help="output format; html writes a self-contained report you can send to someone",
     )
     parser.add_argument("-o", "--output", metavar="FILE", help="write the report to a file")
     parser.add_argument(
@@ -112,6 +115,8 @@ def main(argv: list[str] | None = None) -> int:
         report = render_json(result, root)
     elif args.format == "sarif":
         report = render_sarif(result, root)
+    elif args.format == "html":
+        report = render_html(result, root)
     else:
         report = render_terminal(result, root, stream=sys.stdout)
 
