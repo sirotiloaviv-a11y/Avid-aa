@@ -1,0 +1,30 @@
+# Local development database only. This is not a production deployment.
+#
+#   cp .env.example .env     # then set a password
+#   docker compose up -d
+#   npm run db:migrate
+#
+# Credentials are read from .env — they are never written into this file.
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in .env}
+    ports:
+      # Bound to the loopback interface so the database is not reachable from
+      # the local network. Do not change this to 0.0.0.0 for convenience.
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - veyra-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  veyra-pgdata:

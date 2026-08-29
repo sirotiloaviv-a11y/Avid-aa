@@ -1,0 +1,22 @@
+// Veyra Security Brain — Prisma schema
+//
+// This file currently defines the datasource and generator only. No domain
+// models are declared yet: the project is in its scaffold phase and product
+// functionality has not been designed. Models arrive in the next phase.
+//
+// After changing this file:
+//   npm run db:generate     # regenerate the typed client
+//   npm run db:migrate      # create + apply a development migration
+//
+// Migrations under prisma/migrations/ are committed. The generated client is
+// not — it is rebuilt from this schema on every install.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  // Read from the environment, never hardcoded. See .env.example.
+  url      = env("DATABASE_URL")
+}
