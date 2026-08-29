@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "moat-scanner"
+version = "0.1.0"
+description = "Security scanner for AI agent and MCP configuration"
+readme = "moat/README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+keywords = ["security", "mcp", "ai-agents", "sast", "prompt-injection", "sarif"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Topic :: Security",
+]
+# No runtime dependencies. A security tool that drags in a dependency tree is
+# arguing against its own supply-chain findings, and zero-install is what gets
+# a scanner into someone's CI on the first try.
+dependencies = []
+
+[project.scripts]
+moat = "moat.cli:run"
+
+[project.urls]
+Source = "https://github.com/sirotiloaviv-a11y/avid-aa"
+
+[tool.setuptools]
+packages = ["moat", "moat.rules", "moat.reporters"]
+
+[tool.setuptools.package-data]
+moat = ["py.typed"]
