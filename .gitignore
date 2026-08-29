@@ -14,3 +14,8 @@ __pycache__/
 venv/
 *.egg-info/
 .pytest_cache/
+
+# moat build artifacts
+*.egg-info/
+moat.sarif
+.moat-baseline.json

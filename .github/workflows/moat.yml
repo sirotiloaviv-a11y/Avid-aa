@@ -1,0 +1,49 @@
+name: moat
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Config drifts without a code change: a new MCP server, a widened allow
+    # list, a dependency that starts publishing a poisoned tool description.
+    - cron: "17 4 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Run the test suite
+        run: python -m unittest discover -s tests -t . -v
+
+  scan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # examples/ contains a deliberately vulnerable project used by the test
+      # suite, so it is excluded from the repository's own scan.
+      - name: Scan this repository's own agent configuration
+        run: python -m moat . --exclude 'examples/*' --format sarif -o moat.sarif --fail-on never
+      - name: Upload results to code scanning
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: moat.sarif
+          category: moat
+      - name: Fail on high-severity findings
+        run: python -m moat . --exclude 'examples/*' --fail-on high
