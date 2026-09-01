@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>שבוע של תנועה וגדילה</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Work+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#EEF1E7;
+    --bg-card:#FFFFFF;
+    --ink:#1F2B22;
+    --ink-soft:#5B6857;
+    --green:#5C8F34;
+    --green-deep:#3E5F26;
+    --blue:#3E7CB1;
+    --clay:#D98C5F;
+    --line:#DCE0D0;
+    --radius:14px;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    direction:rtl;
+    background:var(--bg);
+    color:var(--ink);
+    font-family:'Work Sans','Segoe UI',Arial,sans-serif;
+    line-height:1.5;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:760px;margin:0 auto;padding:28px 20px 60px;}
+  :focus-visible{outline:2px solid var(--green-deep);outline-offset:2px;border-radius:6px;}
+
+  /* HERO */
+  .hero{padding:6px 0 22px;border-bottom:1px solid var(--line);margin-bottom:26px;}
+  .hero .kicker{font-size:14px;color:var(--green-deep);font-weight:600;margin-bottom:6px;letter-spacing:.02em;}
+  .hero h1{
+    font-family:'Space Grotesk','Work Sans',sans-serif;
+    font-size:clamp(30px,7vw,42px);
+    margin:0 0 10px;
+    font-weight:700;
+    letter-spacing:-0.01em;
+    text-wrap:balance;
+  }
+  .hero .lede{color:var(--ink-soft);margin:0;font-size:16px;max-width:46ch;}
+
+  /* WEEK TRACK */
+  .track{display:flex;gap:6px;margin-top:22px;}
+  .lane{
+    flex:1;
+    text-align:center;
+    padding:10px 4px 8px;
+    border-radius:10px;
+    background:var(--bg-card);
+    border:1px solid var(--line);
+  }
+  .lane .d{font-size:11px;color:var(--ink-soft);margin-bottom:6px;}
+  .lane .tag{
+    display:inline-block;
+    width:10px;height:10px;
+    border-radius:50%;
+    margin-bottom:2px;
+  }
+  .lane .name{font-size:11px;font-weight:600;margin-top:4px;}
+  .lane.upper .tag{background:var(--green);}
+  .lane.core .tag{background:var(--blue);}
+  .lane.rest .tag{background:var(--clay);}
+  .lane.full .tag{background:var(--green-deep);}
+
+  .legend{display:flex;gap:16px;flex-wrap:wrap;margin-top:14px;font-size:12.5px;color:var(--ink-soft);}
+  .legend span{display:inline-flex;align-items:center;gap:6px;}
+  .legend i{width:9px;height:9px;border-radius:50%;display:inline-block;}
+
+  .focus-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px;}
+  .focus-chip{
+    background:var(--bg-card);
+    border:1px solid var(--line);
+    border-radius:999px;
+    padding:7px 14px;
+    display:flex;
+    align-items:center;
+    gap:8px;
+    font-size:13px;
+  }
+  .focus-chip .fc-label{font-weight:600;color:var(--green-deep);}
+  .focus-chip .fc-day{color:var(--ink-soft);font-size:12px;}
+
+  /* GOAL */
+  .goal-card{
+    background:var(--bg-card);
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    padding:18px;
+  }
+  .goal-steps{display:flex;flex-direction:column;}
+  .goal-step{
+    display:flex;
+    align-items:center;
+    gap:12px;
+    padding:9px 4px;
+    border-bottom:1px dashed var(--line);
+    font-size:14.5px;
+  }
+  .goal-step:last-child{border-bottom:none;}
+  .gs-num{
+    width:24px;height:24px;
+    border-radius:50%;
+    background:var(--bg);
+    border:1px solid var(--line);
+    display:flex;align-items:center;justify-content:center;
+    font-size:12px;font-weight:600;
+    color:var(--ink-soft);
+    flex-shrink:0;
+    font-variant-numeric:tabular-nums;
+  }
+  .goal-step.done .gs-num{background:var(--green);border-color:var(--green);color:#fff;}
+  .goal-note{margin:14px 0 0;font-size:13.5px;color:var(--ink-soft);}
+
+  /* SECTION HEADERS */
+  section{margin-top:40px;}
+  .sec-head{display:flex;align-items:baseline;gap:10px;margin-bottom:16px;flex-wrap:wrap;}
+  .sec-head h2{
+    font-family:'Space Grotesk','Work Sans',sans-serif;
+    font-size:24px;
+    margin:0;
+    font-weight:600;
+    text-wrap:balance;
+  }
+  .sec-head .count{font-size:13px;color:var(--ink-soft);}
+
+  /* WORKOUT CARDS */
+  .days{display:flex;flex-direction:column;gap:12px;}
+  .day-card{
+    background:var(--bg-card);
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    overflow:hidden;
+  }
+  .day-head{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    gap:12px;
+    width:100%;
+    padding:14px 18px;
+    background:none;
+    border:none;
+    border-bottom:1px solid transparent;
+    font:inherit;
+    color:inherit;
+    text-align:start;
+    cursor:pointer;
+  }
+  .day-card.open .day-head{border-bottom-color:var(--line);}
+  .day-head .left{display:flex;align-items:center;gap:10px;}
+  .dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;}
+  .dot.upper{background:var(--green);}
+  .dot.core{background:var(--blue);}
+  .dot.rest{background:var(--clay);}
+  .dot.full{background:var(--green-deep);}
+  .day-head .title{font-weight:600;font-size:15.5px;}
+  .day-head .sub{font-size:12.5px;color:var(--ink-soft);margin-top:1px;}
+  .chev{
+    width:20px;height:20px;
+    transition:transform .2s ease;
+    color:var(--ink-soft);
+    flex-shrink:0;
+  }
+  .day-card.open .chev{transform:rotate(180deg);}
+  .day-body{
+    display:grid;
+    grid-template-rows:0fr;
+    transition:grid-template-rows .25s ease;
+  }
+  .day-card.open .day-body{grid-template-rows:1fr;}
+  .day-body > .inner{overflow:hidden;}
+  .ex-list{padding:14px 18px;margin:0;list-style:none;}
+  .ex-list li{
+    display:flex;
+    justify-content:space-between;
+    align-items:baseline;
+    padding:8px 0;
+    border-bottom:1px dashed var(--line);
+    font-size:14.5px;
+  }
+  .ex-list li:last-child{border-bottom:none;}
+  .ex-list .sets{
+    color:var(--ink-soft);
+    font-weight:500;
+    font-size:13.5px;
+    white-space:nowrap;
+    margin-inline-start:12px;
+    font-variant-numeric:tabular-nums;
+  }
+  .rest-note{padding:16px 18px;font-size:14px;color:var(--ink-soft);}
+
+  /* NUTRITION */
+  .meal-grid{display:grid;grid-template-columns:1fr;gap:12px;}
+  .meal-card{
+    background:var(--bg-card);
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    padding:16px 18px;
+  }
+  .meal-card .m-title{
+    font-family:'Space Grotesk','Work Sans',sans-serif;
+    font-weight:600;
+    font-size:15.5px;
+    margin-bottom:6px;
+    color:var(--green-deep);
+  }
+  .meal-card p{margin:0;font-size:14.5px;}
+
+  .tips{
+    background:var(--green-deep);
+    color:#F3F5EC;
+    border-radius:var(--radius);
+    padding:20px;
+    margin-top:14px;
+  }
+  .tips h3{
+    font-family:'Space Grotesk','Work Sans',sans-serif;
+    margin:0 0 10px;
+    font-size:16px;
+  }
+  .tips ul{margin:0;padding-inline-start:18px;font-size:14px;line-height:1.7;}
+  .tips li{margin-bottom:2px;}
+
+  .note{
+    margin-top:34px;
+    font-size:13px;
+    color:var(--ink-soft);
+    border-top:1px solid var(--line);
+    padding-top:16px;
+  }
+
+  @media (prefers-reduced-motion:reduce){
+    *{transition:none !important;}
+  }
+
+  @media print{
+    body{background:#fff;}
+    .day-body{grid-template-rows:1fr !important;}
+    .chev{display:none;}
+    .day-card{break-inside:avoid;}
+    .tips{background:#fff;color:var(--ink);border:1px solid var(--line);}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <div class="kicker">התוכנית האישית שלי</div>
+    <h1>שבוע של תנועה וגדילה</h1>
+    <p class="lede">4 ימי אימון, משקל גוף בלבד, בקצב שמתאים לגוף שעדיין גדל. המטרה: להתחזק, לא לחתוך.</p>
+
+    <div class="track">
+      <div class="lane upper"><div class="d">א׳</div><span class="tag"></span><div class="name">עליון</div></div>
+      <div class="lane core"><div class="d">ב׳</div><span class="tag"></span><div class="name">בטן</div></div>
+      <div class="lane rest"><div class="d">ג׳</div><span class="tag"></span><div class="name">מנוחה</div></div>
+      <div class="lane upper"><div class="d">ד׳</div><span class="tag"></span><div class="name">גב+קרדיו</div></div>
+      <div class="lane full"><div class="d">ה׳</div><span class="tag"></span><div class="name">פול בודי</div></div>
+      <div class="lane rest"><div class="d">ו׳</div><span class="tag"></span><div class="name">חופשי</div></div>
+      <div class="lane rest"><div class="d">ש׳</div><span class="tag"></span><div class="name">חופשי</div></div>
+    </div>
+    <div class="legend">
+      <span><i style="background:#5C8F34"></i>עליון גוף</span>
+      <span><i style="background:#3E7CB1"></i>בטן/ליבה</span>
+      <span><i style="background:#3E5F26"></i>פול בודי</span>
+      <span><i style="background:#D98C5F"></i>מנוחה/חופשי</span>
+    </div>
+
+    <div class="focus-row">
+      <div class="focus-chip"><span class="fc-label">גב</span><span class="fc-day">יום ד׳</span></div>
+      <div class="focus-chip"><span class="fc-label">בטן</span><span class="fc-day">יום ב׳ + ה׳</span></div>
+      <div class="focus-chip"><span class="fc-label">ידיים</span><span class="fc-day">יום א׳ + ד׳</span></div>
+      <div class="focus-chip"><span class="fc-label">קואורדינציה</span><span class="fc-day">יום ה׳</span></div>
+    </div>
+  </header>
+
+  <section>
+    <div class="sec-head">
+      <h2>מטרה: 5 עליות מתח ברצף</h2>
+    </div>
+    <div class="goal-card">
+      <div class="goal-steps">
+        <div class="goal-step done"><span class="gs-num">1</span><span>תלייה פסיבית 20 שנ׳</span></div>
+        <div class="goal-step"><span class="gs-num">2</span><span>משיכה שלילית איטית (5 שנ׳ ירידה)</span></div>
+        <div class="goal-step"><span class="gs-num">3</span><span>עלייה חלקית בעזרת רגליים</span></div>
+        <div class="goal-step"><span class="gs-num">4</span><span>עלייה מלאה אחת</span></div>
+        <div class="goal-step"><span class="gs-num">5</span><span>5 ברצף</span></div>
+      </div>
+      <p class="goal-note">מתאמנים על זה ביום ד׳. מתקדמים לשלב הבא רק כשהשלב הנוכחי מרגיש קל — זה יכול לקחת כמה שבועות, וזה בסדר גמור.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <h2>אימונים</h2>
+      <span class="count">4 ימי אימון פעילים</span>
+    </div>
+
+    <div class="days">
+      <div class="day-card open">
+        <button class="day-head" type="button" aria-expanded="true" aria-controls="day-sun">
+          <span class="left">
+            <span class="dot upper"></span>
+            <span><span class="title">יום א׳ — פלג גוף עליון</span><span class="sub" style="display:block">חזה, כתפיים, יד אחורית</span></span>
+          </span>
+          <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+        <div class="day-body" id="day-sun"><div class="inner">
+          <ul class="ex-list">
+            <li><span>שכיבות סמיכה</span><span class="sets">3 × 8–12</span></li>
+            <li><span>שכיבות סמיכה יהלום</span><span class="sets">3 × 6–10</span></li>
+            <li><span>Pike push-ups</span><span class="sets">3 × 8–10</span></li>
+            <li><span>פלאנק</span><span class="sets">3 × 30 שנ׳</span></li>
+          </ul>
+        </div></div>
+      </div>
+
+      <div class="day-card">
+        <button class="day-head" type="button" aria-expanded="false" aria-controls="day-mon">
+          <span class="left">
+            <span class="dot core"></span>
+            <span><span class="title">יום ב׳ — בטן וליבה</span><span class="sub" style="display:block">חיזוק ליבה</span></span>
+          </span>
+          <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+        <div class="day-body" id="day-mon"><div class="inner">
+          <ul class="ex-list">
+            <li><span>כפיפות בטן (Crunches)</span><span class="sets">3 × 15–20</span></li>
+            <li><span>הרמות רגליים</span><span class="sets">3 × 10–15</span></li>
+            <li><span>פלאנק</span><span class="sets">3 × 30–45 שנ׳</span></li>
+            <li><span>Russian twists</span><span class="sets">3 × 20</span></li>
+          </ul>
+        </div></div>
+      </div>
+
+      <div class="day-card">
+        <button class="day-head" type="button" aria-expanded="false" aria-controls="day-tue">
+          <span class="left">
+            <span class="dot rest"></span>
+            <span><span class="title">יום ג׳ — מנוחה פעילה</span><span class="sub" style="display:block">הליכה, כדור, שחייה</span></span>
+          </span>
+          <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+        <div class="day-body" id="day-tue"><div class="inner">
+          <p class="rest-note">יום להתאוששות — תנועה קלה ונעימה, בלי אימון מובנה. הגוף בונה שריר בזמן המנוחה, לא רק באימון.</p>
+        </div></div>
+      </div>
+
+      <div class="day-card">
+        <button class="day-head" type="button" aria-expanded="false" aria-controls="day-wed">
+          <span class="left">
+            <span class="dot upper"></span>
+            <span><span class="title">יום ד׳ — גב, ידיים וקרדיו</span><span class="sub" style="display:block">משיכה + לב-ריאה</span></span>
+          </span>
+          <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+        <div class="day-body" id="day-wed"><div class="inner">
+          <ul class="ex-list">
+            <li><span>תלייה פסיבית על המתח</span><span class="sets">3 × 15–20 שנ׳</span></li>
+            <li><span>משיכות שליליות (Negative pull-ups)</span><span class="sets">4 × 3–5</span></li>
+            <li><span>Australian pull-ups (מתח נמוך/מוט)</span><span class="sets">3 × 10–12</span></li>
+            <li><span>ניסיון עלייה מלאה</span><span class="sets">עד כשל</span></li>
+            <li><span>ריצה קלה / קפיצות בחבל</span><span class="sets">10 דק׳</span></li>
+          </ul>
+        </div></div>
+      </div>
+
+      <div class="day-card">
+        <button class="day-head" type="button" aria-expanded="false" aria-controls="day-thu">
+          <span class="left">
+            <span class="dot full"></span>
+            <span><span class="title">יום ה׳ — פול בודי</span><span class="sub" style="display:block">גוף מלא</span></span>
+          </span>
+          <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+        <div class="day-body" id="day-thu"><div class="inner">
+          <ul class="ex-list">
+            <li><span>סקוואטים</span><span class="sets">3 × 15</span></li>
+            <li><span>לאנג׳ים</span><span class="sets">3 × 10 לרגל</span></li>
+            <li><span>ברפי</span><span class="sets">3 × 8</span></li>
+            <li><span>פלאנק</span><span class="sets">3 × 30 שנ׳</span></li>
+          </ul>
+        </div></div>
+      </div>
+
+      <div class="day-card">
+        <button class="day-head" type="button" aria-expanded="false" aria-controls="day-weekend">
+          <span class="left">
+            <span class="dot rest"></span>
+            <span><span class="title">שישי–שבת — חופשי</span><span class="sub" style="display:block">ספורט לפי בחירה</span></span>
+          </span>
+          <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+        <div class="day-body" id="day-weekend"><div class="inner">
+          <p class="rest-note">כדורגל, אופניים, שחייה — כל תנועה שכיפה, בלי לחץ של "אימון".</p>
+        </div></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <h2>תזונה יומית</h2>
+      <span class="count">3 ארוחות + חטיפים</span>
+    </div>
+    <div class="meal-grid">
+      <div class="meal-card">
+        <div class="m-title">ארוחת בוקר</div>
+        <p>ביצים / גבינה / יוגורט + לחם מלא או דגני בוקר + פרי</p>
+      </div>
+      <div class="meal-card">
+        <div class="m-title">ארוחת צהריים</div>
+        <p>מקור חלבון (עוף, דג, קטניות, בשר) + פחמימה (אורז, פסטה, תפו״א) + ירקות</p>
+      </div>
+      <div class="meal-card">
+        <div class="m-title">ארוחת ערב</div>
+        <p>חלבון + ירקות + פחמימה קלה יותר</p>
+      </div>
+      <div class="meal-card">
+        <div class="m-title">חטיפים בין הארוחות</div>
+        <p>אגוזים, פרי, יוגורט, טוסט עם גבינה, חטיף חלבון או גרנולה</p>
+      </div>
+    </div>
+
+    <div class="tips">
+      <h3>עקרונות חשובים לגיל שלך</h3>
+      <ul>
+        <li>לאכול מספיק ולא לדלג על ארוחות — הגוף צריך אנרגיה לגדול <b>וגם</b> להתחזק</li>
+        <li>לשתות הרבה מים לאורך היום</li>
+        <li>לישון 8–9 שעות בלילה — שם קורית ההתאוששות האמיתית</li>
+        <li>להימנע ממשקאות ממותקים וג׳אנק פוד יומיומי, בלי לבטל לגמרי</li>
+      </ul>
+    </div>
+  </section>
+
+  <p class="note">
+    התוכנית מותאמת לגיל התבגרות — הדגש הוא על כוח, קואורדינציה וכושר כללי, לא על "חיטוב" או צמצום קלוריות. ככל שתתחזק, אפשר להוסיף חזרות בהדרגה.
+  </p>
+
+</div>
+<script>
+  document.querySelectorAll('.day-head').forEach(function (head) {
+    head.addEventListener('click', function () {
+      var card = head.closest('.day-card');
+      var open = card.classList.toggle('open');
+      head.setAttribute('aria-expanded', open ? 'true' : 'false');
+    });
+  });
+</script>
+</body>
+</html>
