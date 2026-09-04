@@ -60,9 +60,17 @@ DANGEROUS_COMMANDS: dict[str, str] = {
 }
 
 #: Subcommands that only read, so scoping to them defuses the parent command.
+#: An entry may be more than one word: `gh` names a resource before the verb, so
+#: it is the verb that decides whether the grant writes. `gh issue` covers
+#: `gh issue create` and is therefore not read-only, while `gh issue list` is.
 READ_ONLY_SUBCOMMANDS: dict[str, set[str]] = {
     "git": {"status", "diff", "log", "show", "branch", "blame", "describe", "ls-files"},
-    "gh": {"pr", "issue", "run", "repo"} - {"pr"},  # `gh pr` can merge; keep it flagged
+    "gh": {
+        "issue list", "issue view", "issue status",
+        "pr list", "pr view", "pr status", "pr diff", "pr checks",
+        "repo list", "repo view",
+        "run list", "run view",
+    },
     "docker": {"ps", "images", "logs", "inspect"},
     "kubectl": {"get", "describe", "logs", "top"},
     "aws": set(),
@@ -144,9 +152,13 @@ def dangerous_allow(target: Target) -> Iterator[Finding]:
             if reason is None:
                 continue
             # A grant scoped to a read-only subcommand is not the risk the entry
-            # in DANGEROUS_COMMANDS describes: `git status` cannot push.
-            subcommand = words[1].lower().strip("*:") if len(words) > 1 else ""
-            if program in READ_ONLY_SUBCOMMANDS and subcommand in READ_ONLY_SUBCOMMANDS[program]:
+            # in DANGEROUS_COMMANDS describes: `git status` cannot push. Entries
+            # are matched against both the first subcommand word and the first
+            # two, so a one-word entry still defuses `git log --oneline` while
+            # `gh issue` on its own remains flagged — it permits `gh issue create`.
+            tokens = [word.lower().strip("*:") for word in words[1:3]]
+            scoped = {" ".join(tokens[:count]) for count in range(1, len(tokens) + 1)}
+            if scoped & READ_ONLY_SUBCOMMANDS.get(program, set()):
                 continue
             capability = classify_shell(argument)
             severity = Severity.HIGH if Capability.EXFIL in capability else Severity.MEDIUM

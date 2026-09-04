@@ -75,6 +75,32 @@ class TestPermissions(ProjectTestCase):
         self.write(".claude/settings.json", {"permissions": {"allow": ["Bash(git status:*)"]}})
         self.assertClean("MOAT-PERM-003")
 
+    def test_writing_gh_subcommand_is_dangerous(self):
+        """`gh` names the resource before the verb, and the verb decides."""
+        for grant in (
+            "Bash(gh issue create:*)",
+            "Bash(gh issue comment:*)",
+            "Bash(gh repo delete:*)",
+            "Bash(gh run rerun:*)",
+            "Bash(gh api:*)",
+            # A grant stopping at the resource still permits `gh issue create`.
+            "Bash(gh issue:*)",
+        ):
+            with self.subTest(grant=grant):
+                self.write(".claude/settings.json", {"permissions": {"allow": [grant]}})
+                self.assertFinds("MOAT-PERM-003")
+
+    def test_read_only_gh_subcommand_is_not_dangerous(self):
+        for grant in (
+            "Bash(gh issue list:*)",
+            "Bash(gh pr view:*)",
+            "Bash(gh pr checks:*)",
+            "Bash(gh run view:*)",
+        ):
+            with self.subTest(grant=grant):
+                self.write(".claude/settings.json", {"permissions": {"allow": [grant]}})
+                self.assertClean("MOAT-PERM-003")
+
     def test_home_directory_grant(self):
         self.write(".claude/settings.json", {"permissions": {"additionalDirectories": ["~"]}})
         self.assertFinds("MOAT-PERM-004")
