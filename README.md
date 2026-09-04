@@ -1,6 +1,6 @@
 # Avid-aa
 
-Two independent security projects.
+Three independent projects.
 
 ## [`moat/`](moat/README.md) — security scanner for AI agent configuration
 
@@ -21,3 +21,16 @@ No dependencies. Emits SARIF for GitHub code scanning.
 Monitors Hebrew-language news and Telegram sources for security events, matches
 them against a keyword ruleset that handles Hebrew prefixes, suffixes and
 niqqud, and dispatches alerts.
+
+## [`api/`](api/README.md) — product HTTP API
+
+A TypeScript HTTP API over the product catalogue, serving a product's live
+stock position at `GET /api/products/:id/availability`.
+
+```bash
+cd api && npm start
+```
+
+Dependency-free and build-step-free: Node builtins only, run straight from
+TypeScript source.
+[Full documentation →](api/README.md)

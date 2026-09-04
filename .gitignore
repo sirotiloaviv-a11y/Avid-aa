@@ -19,3 +19,7 @@ venv/
 *.egg-info/
 moat.sarif
 .moat-baseline.json
+
+# api (Node)
+node_modules/
+api/data/
