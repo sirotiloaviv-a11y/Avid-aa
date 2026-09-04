@@ -10,7 +10,7 @@ from pathlib import Path
 from .models import Severity
 from .reporters import render_json, render_sarif, render_terminal
 from .rules import load_all, load_project_rules
-from .scanner import scan
+from .scanner import load_baseline, scan
 from .version import __version__
 
 EXIT_OK = 0
@@ -90,22 +90,27 @@ def main(argv: list[str] | None = None) -> int:
     fail_on = _severity(args.fail_on, parser)
     min_severity = _severity(args.min_severity, parser) or Severity.INFO
 
+    baseline = Path(args.baseline) if args.baseline else None
     result = scan(
         root,
-        baseline=Path(args.baseline) if args.baseline else None,
+        baseline=baseline,
         min_severity=min_severity,
         disabled=set(args.disable),
         exclude=tuple(args.exclude),
     )
 
     if args.write_baseline:
+        # Findings already accepted by --baseline are filtered out of the scan,
+        # so writing only what remains would silently un-accept every finding
+        # the team has triaged. Re-baselining adds to the baseline.
+        fingerprints = {f.fingerprint for f in result.findings} | load_baseline(baseline)
         payload = {
             "version": 1,
             "note": "Fingerprints accepted for this repository. Remove an entry to re-report it.",
-            "fingerprints": sorted(f.fingerprint for f in result.findings),
+            "fingerprints": sorted(fingerprints),
         }
         Path(args.write_baseline).write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-        print(f"Wrote {len(result.findings)} fingerprint(s) to {args.write_baseline}", file=sys.stderr)
+        print(f"Wrote {len(fingerprints)} fingerprint(s) to {args.write_baseline}", file=sys.stderr)
         return EXIT_OK
 
     if args.format == "json":

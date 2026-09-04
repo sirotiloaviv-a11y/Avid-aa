@@ -68,6 +68,36 @@ class TestExitCodes(ProjectTestCase):
         self.assertEqual(code, EXIT_OK)
         self.assertEqual(json.loads(out)["summary"]["findings"], 0)
 
+    def test_rebaselining_keeps_already_accepted_fingerprints(self):
+        """--baseline hides findings from the scan, so --write-baseline must
+        add to the file rather than replace it with what is left."""
+        baseline = self.root / "baseline.json"
+        with redirect_stdout(io.StringIO()):
+            main([str(self.root), "--write-baseline", str(baseline)])
+        accepted = set(json.loads(baseline.read_text())["fingerprints"])
+        self.assertTrue(accepted)
+
+        # A later run that re-baselines while honouring the existing baseline.
+        with redirect_stdout(io.StringIO()):
+            main([str(self.root), "--baseline", str(baseline), "--write-baseline", str(baseline)])
+        self.assertEqual(set(json.loads(baseline.read_text())["fingerprints"]), accepted)
+
+        code, out = self.run_cli("--format", "json", "--baseline", str(baseline))
+        self.assertEqual(code, EXIT_OK)
+        self.assertEqual(json.loads(out)["summary"]["findings"], 0)
+
+    def test_rebaselining_accepts_findings_that_appeared_since(self):
+        baseline = self.root / "baseline.json"
+        with redirect_stdout(io.StringIO()):
+            main([str(self.root), "--write-baseline", str(baseline)])
+        accepted = set(json.loads(baseline.read_text())["fingerprints"])
+
+        self.write(".mcp.json", {"mcpServers": {"a": {"command": "npx", "args": ["new-server"]}}})
+        with redirect_stdout(io.StringIO()):
+            main([str(self.root), "--baseline", str(baseline), "--write-baseline", str(baseline)])
+        widened = set(json.loads(baseline.read_text())["fingerprints"])
+        self.assertTrue(accepted < widened, "the new finding should be added to the baseline")
+
     def test_disable_flag_is_repeatable(self):
         _, out = self.run_cli("--format", "json", "--disable", "MOAT-PERM-002", "--disable", "MOAT-TRIFECTA-001")
         rules = {f["rule"] for f in json.loads(out)["findings"]}

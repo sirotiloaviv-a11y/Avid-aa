@@ -20,7 +20,9 @@ KINDS = (MCP_CONFIG,)
 #: Runners that resolve a package name over the network at launch time.
 FETCHING_RUNNERS = {"npx", "uvx", "pipx", "bunx", "pnpx", "dlx"}
 
-_PINNED = re.compile(r"@(?:\d+\.\d+|\^|~|latest\b)|==\d|@[0-9a-f]{40}$")
+# `@latest` is not a pin: it resolves over the network at every launch, which
+# is precisely what this rule exists to report.
+_PINNED = re.compile(r"@(?:\d+\.\d+|\^|~)|==\d|@[0-9a-f]{40}$")
 _PIPE_TO_SHELL = re.compile(r"(?:curl|wget)[^|;]*\|\s*(?:sudo\s+)?(?:ba|z|k|fi)?sh")
 
 

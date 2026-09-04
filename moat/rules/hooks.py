@@ -19,7 +19,12 @@ from . import rule
 KINDS = (AGENT_SETTINGS,)
 
 #: Variables a host substitutes into a hook command, carrying model or tool data.
-INTERPOLATION = re.compile(r"\$\{?(CLAUDE_[A-Z_]+|TOOL_[A-Z_]+|[A-Z_]*PROMPT[A-Z_]*|[A-Z_]*INPUT[A-Z_]*|[A-Z_]*ARGS?)\}?")
+#: ARG must be a whole trailing segment of the name: matching it as a substring
+#: turns ordinary variables like $TARGET_DIR into a command-injection finding.
+INTERPOLATION = re.compile(
+    r"\$\{?(CLAUDE_[A-Z_]+|TOOL_[A-Z_]+|[A-Z_]*PROMPT[A-Z_]*|[A-Z_]*INPUT[A-Z_]*"
+    r"|(?:[A-Z_]*_)?ARGS?(?![A-Z]))\}?"
+)
 #: The same variable, but already inside single quotes (safe) or double (not).
 _SINGLE_QUOTED = re.compile(r"'[^']*\$\{?(?:CLAUDE_|TOOL_)[A-Z_]+\}?[^']*'")
 
