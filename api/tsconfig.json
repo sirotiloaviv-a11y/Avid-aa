@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "target": "es2023",
+    "lib": ["es2023"],
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+
+    // Node runs these files through its built-in type stripping rather than a
+    // build step, so every construct has to be erasable and every relative
+    // import has to name the file Node will actually open.
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+
+    "skipLibCheck": true,
+    "types": []
+  },
+  "include": ["src", "tests"]
+}
