@@ -21,3 +21,16 @@ No dependencies. Emits SARIF for GitHub code scanning.
 Monitors Hebrew-language news and Telegram sources for security events, matches
 them against a keyword ruleset that handles Hebrew prefixes, suffixes and
 niqqud, and dispatches alerts.
+
+## [`fitness-platform/`](fitness-platform/README.md) — Hebrew fitness & nutrition SaaS
+
+A production-shaped platform with three experiences behind one brand: a women's
+track, a men's track, and an admin console. The split between tracks is enforced
+server-side at every layer, not in the UI.
+
+```bash
+cd fitness-platform && python3 -m fitness_platform seed && python3 -m fitness_platform serve
+```
+
+Python 3.11 standard library only — no runtime dependencies.
+[Full documentation →](fitness-platform/README.md)

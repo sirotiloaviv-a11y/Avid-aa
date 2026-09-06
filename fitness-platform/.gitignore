@@ -1,0 +1,6 @@
+# Runtime state: database, uploads, server logs. Never committed.
+var/
+*.db
+*.db-wal
+*.db-shm
+.env

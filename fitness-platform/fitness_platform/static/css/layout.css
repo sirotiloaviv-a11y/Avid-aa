@@ -1,0 +1,208 @@
+/* Shells: public site, app (sidebar + topbar), admin (32). Mobile first. */
+
+/* -------------------------------------------------------- public shell -- */
+.site-header {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background: rgba(255, 255, 255, 0.82);
+  backdrop-filter: blur(14px);
+  border-bottom: 1px solid rgba(226, 231, 240, 0.7);
+}
+.site-header-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  height: 68px;
+}
+.brand { display: inline-flex; align-items: center; gap: var(--space-2); font-weight: 800; }
+.brand-mark {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-md);
+  background: var(--brand-gradient);
+  color: #fff;
+  box-shadow: var(--shadow-brand);
+}
+.brand-name { font-size: var(--text-md); letter-spacing: -0.02em; }
+.site-nav { display: none; gap: var(--space-5); font-size: var(--text-base); color: var(--gray-600); font-weight: 500; }
+.site-nav a:hover { color: var(--brand-strong); }
+.site-header-actions { display: none; align-items: center; gap: var(--space-3); }
+.nav-link-plain { font-weight: 600; color: var(--gray-600); }
+.site-menu-toggle { display: inline-flex; }
+.site-drawer {
+  display: grid;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+.site-drawer nav { display: grid; gap: var(--space-3); font-weight: 600; }
+.site-drawer-actions { display: grid; gap: var(--space-2); }
+
+.site-main { min-height: 60vh; }
+
+.site-footer { margin-top: var(--space-10); padding: var(--space-8) 0; border-top: 1px solid var(--border); }
+.site-footer-inner { display: grid; gap: var(--space-5); }
+.site-footer nav { display: flex; gap: var(--space-4); flex-wrap: wrap; font-size: var(--text-sm); color: var(--text-muted); }
+.site-footer-note { font-size: var(--text-sm); color: var(--text-muted); margin-top: var(--space-2); }
+.site-footer-legal { font-size: var(--text-xs); color: var(--gray-400); }
+
+/* ----------------------------------------------------------- app shell -- */
+.app-shell { display: flex; min-height: 100vh; }
+
+.sidebar {
+  position: fixed;
+  inset-block: 0;
+  inset-inline-start: 0;
+  z-index: 70;
+  width: var(--sidebar-width);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  padding: var(--space-5) var(--space-4);
+  background: var(--sidebar-bg);
+  border-inline-end: 1px solid var(--border);
+  /* Hidden off the inline-start edge. The two directions need opposite signs,
+     and both must be overridden together at the desktop breakpoint — a bare
+     `.sidebar { transform: none }` there would lose to `[dir="rtl"] .sidebar`
+     on specificity and leave the rail parked off-screen. */
+  transform: translateX(-100%);
+  transition: transform var(--normal) var(--ease);
+  visibility: hidden;
+}
+[dir="rtl"] .sidebar { transform: translateX(100%); }
+.sidebar.is-open,
+[dir="rtl"] .sidebar.is-open { transform: none; visibility: visible; }
+.sidebar-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); flex-wrap: wrap; }
+.sidebar-subtitle { width: 100%; font-size: var(--text-xs); color: var(--text-muted); }
+.sidebar-close { display: inline-flex; }
+.sidebar-nav { display: grid; gap: 4px; flex: 1 1 auto; align-content: start; }
+.side-link {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 11px 14px;
+  border-radius: var(--radius-md);
+  color: var(--sidebar-text);
+  font-size: var(--text-base);
+  font-weight: 600;
+  transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease);
+  border: 0;
+  background: transparent;
+  width: 100%;
+  text-align: start;
+}
+.side-link:hover { background: var(--sidebar-active-bg); color: var(--sidebar-active-text); }
+.side-link.is-active { background: var(--sidebar-active-bg); color: var(--sidebar-active-text); }
+.side-link-icon { display: grid; place-items: center; flex: none; }
+.side-link-label { flex: 1 1 auto; }
+.side-link-badge {
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--brand);
+  color: #fff;
+  font-size: var(--text-xs);
+}
+.side-link-quiet { color: var(--text-muted); font-weight: 500; }
+.sidebar-foot { border-top: 1px solid var(--border); padding-top: var(--space-3); }
+.sidebar-logout { margin: 0; }
+
+.admin-shell .sidebar { border-inline-end: 0; }
+.admin-shell .brand-name { color: #fff; }
+.admin-shell .sidebar-subtitle { color: rgba(255, 255, 255, 0.55); }
+.admin-shell .sidebar-foot { border-color: rgba(255, 255, 255, 0.12); }
+.admin-shell .side-link-quiet { color: rgba(255, 255, 255, 0.6); }
+
+.app-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: var(--topbar-height);
+  padding: var(--space-3) var(--space-4);
+  background: rgba(255, 255, 255, 0.86);
+  backdrop-filter: blur(14px);
+  border-bottom: 1px solid var(--border);
+}
+.topbar-menu { display: inline-flex; }
+.topbar-titles { flex: 1 1 auto; min-width: 0; }
+.topbar-title { font-size: var(--text-lg); }
+.topbar-subtitle { font-size: var(--text-sm); color: var(--text-muted); }
+.topbar-actions { display: flex; align-items: center; gap: var(--space-2); }
+.topbar-user { display: inline-flex; align-items: center; gap: var(--space-2); }
+.topbar-user-name { display: none; font-weight: 600; font-size: var(--text-sm); }
+
+.app-content { padding: var(--space-5) var(--space-4) var(--space-9); display: grid; gap: var(--space-5); }
+
+.drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(22, 29, 51, 0.4);
+}
+
+/* ---------------------------------------------------------------- grid -- */
+.grid { display: grid; gap: var(--space-4); }
+.grid-2 { grid-template-columns: 1fr; }
+.grid-3 { grid-template-columns: 1fr; }
+.grid-4 { grid-template-columns: 1fr; }
+.grid-auto { grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
+.grid-cards { grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); }
+
+.split { display: grid; gap: var(--space-4); }
+
+/* ------------------------------------------------------------ responsive */
+@media (min-width: 640px) {
+  .grid-2 { grid-template-columns: repeat(2, 1fr); }
+  .grid-4 { grid-template-columns: repeat(2, 1fr); }
+  .topbar-user-name { display: inline; }
+  .app-content { padding-inline: var(--space-5); }
+}
+
+@media (min-width: 900px) {
+  .site-nav { display: flex; }
+  .site-header-actions { display: flex; }
+  .site-menu-toggle { display: none; }
+  .site-drawer { display: none !important; }
+  .grid-3 { grid-template-columns: repeat(3, 1fr); }
+  .split { grid-template-columns: 1.6fr 1fr; }
+  .site-footer-inner { grid-template-columns: 1.2fr 1fr 1.2fr; align-items: start; }
+}
+
+@media (min-width: 1080px) {
+  .sidebar,
+  [dir="rtl"] .sidebar {
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    transform: none;
+    visibility: visible;
+  }
+  .sidebar-close { display: none; }
+  .topbar-menu { display: none; }
+  .drawer-backdrop { display: none !important; }
+  .grid-4 { grid-template-columns: repeat(4, 1fr); }
+  .app-content { padding: var(--space-6) var(--space-7) var(--space-9); }
+  .topbar { padding-inline: var(--space-7); }
+}
+
+@media (min-width: 1400px) {
+  :root { --sidebar-width: 262px; }
+}
+
+@media print {
+  .sidebar, .topbar, .site-header, .site-footer, .toast-host { display: none !important; }
+  .app-content { padding: 0; }
+}

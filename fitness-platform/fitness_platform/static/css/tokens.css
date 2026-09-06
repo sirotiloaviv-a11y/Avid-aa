@@ -1,0 +1,169 @@
+/* Design tokens (30).
+ *
+ * One scale for spacing, radius, shadow and type; three palettes layered on
+ * top of it. A screen never names a colour directly — it uses --brand-*, and
+ * the theme class on <html> decides what that means. Adding a fourth path
+ * later is a new block here and nothing else.
+ */
+
+:root {
+  /* --- neutral ramp ---------------------------------------------------- */
+  --gray-0: #ffffff;
+  --gray-25: #fbfcfe;
+  --gray-50: #f6f8fc;
+  --gray-100: #eef1f7;
+  --gray-200: #e2e7f0;
+  --gray-300: #ccd3e0;
+  --gray-400: #9aa4b8;
+  --gray-500: #6b7793;
+  --gray-600: #4d5875;
+  --gray-700: #333d5c;
+  --gray-800: #232c47;
+  --gray-900: #161d33;
+
+  /* --- semantic -------------------------------------------------------- */
+  --success: #12a870;
+  --success-soft: #e4f7ef;
+  --warning: #e2960f;
+  --warning-soft: #fdf3e0;
+  --danger: #e0435c;
+  --danger-soft: #fdebee;
+  --info: #3d78e8;
+  --info-soft: #eaf1fe;
+
+  /* --- path accents (used by charts and the landing cards) ------------- */
+  --female: #e5639c;
+  --female-soft: #fdeef5;
+  --male: #2f6fe4;
+  --male-soft: #eaf1fe;
+
+  /* --- typography ------------------------------------------------------ */
+  --font-sans: "Assistant", "Rubik", "Heebo", "Segoe UI", system-ui, -apple-system,
+    "Noto Sans Hebrew", "Arial Hebrew", Arial, sans-serif;
+  --text-xs: 0.75rem;
+  --text-sm: 0.8125rem;
+  --text-base: 0.9375rem;
+  --text-md: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.375rem;
+  --text-2xl: 1.75rem;
+  --text-3xl: 2.25rem;
+  --text-4xl: 3rem;
+  --leading-tight: 1.25;
+  --leading-normal: 1.6;
+
+  /* --- space ----------------------------------------------------------- */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 32px;
+  --space-8: 40px;
+  --space-9: 56px;
+  --space-10: 72px;
+
+  /* --- radius ---------------------------------------------------------- */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 22px;
+  --radius-2xl: 28px;
+  --radius-pill: 999px;
+
+  /* --- elevation ------------------------------------------------------- */
+  --shadow-xs: 0 1px 2px rgba(22, 29, 51, 0.05);
+  --shadow-sm: 0 2px 8px rgba(22, 29, 51, 0.06);
+  --shadow-md: 0 10px 24px rgba(22, 29, 51, 0.07);
+  --shadow-lg: 0 18px 48px rgba(22, 29, 51, 0.10);
+  --shadow-brand: 0 12px 26px rgba(229, 99, 156, 0.28);
+
+  /* --- motion ---------------------------------------------------------- */
+  --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --fast: 140ms;
+  --normal: 220ms;
+
+  /* --- layout ---------------------------------------------------------- */
+  --sidebar-width: 246px;
+  --topbar-height: 72px;
+  --container: 1200px;
+
+  /* --- defaults overridden per theme ----------------------------------- */
+  --brand: #2f6fe4;
+  --brand-strong: #1d51b8;
+  --brand-soft: #eaf1fe;
+  --brand-softer: #f5f8ff;
+  --brand-contrast: #ffffff;
+  --brand-gradient: linear-gradient(135deg, #3f7cf0 0%, #2454bd 100%);
+  --page-bg: linear-gradient(180deg, #f7f9fe 0%, #f4f7fd 100%);
+  --surface: var(--gray-0);
+  --surface-muted: var(--gray-50);
+  --border: var(--gray-200);
+  --text: var(--gray-800);
+  --text-muted: var(--gray-500);
+  --sidebar-bg: rgba(255, 255, 255, 0.92);
+  --sidebar-text: var(--gray-600);
+  --sidebar-active-bg: var(--brand-soft);
+  --sidebar-active-text: var(--brand-strong);
+  --chart-female: var(--female);
+  --chart-male: var(--male);
+  --chart-brand: var(--brand);
+}
+
+/* --- Women: soft pink, premium and calm (5, 30) ------------------------ */
+.theme-women {
+  --brand: #e5639c;
+  --brand-strong: #c8467f;
+  --brand-soft: #fdeef5;
+  --brand-softer: #fef7fa;
+  --brand-contrast: #ffffff;
+  --brand-gradient: linear-gradient(135deg, #f27fb1 0%, #d24a86 100%);
+  --page-bg: linear-gradient(180deg, #fdf4f8 0%, #fbf7fb 45%, #f8f9fe 100%);
+  --shadow-brand: 0 12px 26px rgba(229, 99, 156, 0.26);
+  --sidebar-active-bg: #fdeef5;
+  --sidebar-active-text: #c8467f;
+  --text: #26243a;
+}
+
+/* --- Men: blue and navy, strong and clean (6, 30) ---------------------- */
+.theme-men {
+  --brand: #2f6fe4;
+  --brand-strong: #1c4fb5;
+  --brand-soft: #e9f0fe;
+  --brand-softer: #f4f8ff;
+  --brand-contrast: #ffffff;
+  --brand-gradient: linear-gradient(135deg, #3d7bf0 0%, #1b429b 100%);
+  --page-bg: linear-gradient(180deg, #f3f7ff 0%, #f5f8fd 55%, #f7f9fc 100%);
+  --shadow-brand: 0 12px 26px rgba(47, 111, 228, 0.24);
+  --sidebar-active-bg: #e9f0fe;
+  --sidebar-active-text: #1c4fb5;
+  --text: #1d2540;
+}
+
+/* --- Admin: professional SaaS, dark navy rail (22, 30) ----------------- */
+.theme-admin {
+  --brand: #3f6ae0;
+  --brand-strong: #2b4fbb;
+  --brand-soft: #ecf1fe;
+  --brand-softer: #f6f8ff;
+  --brand-gradient: linear-gradient(135deg, #4a76ea 0%, #2b4fbb 100%);
+  --page-bg: #f6f8fc;
+  --sidebar-bg: #151c34;
+  --sidebar-text: #a9b3cd;
+  --sidebar-active-bg: rgba(255, 255, 255, 0.10);
+  --sidebar-active-text: #ffffff;
+  --shadow-brand: 0 10px 22px rgba(63, 106, 224, 0.22);
+}
+
+/* --- Neutral: landing and auth screens --------------------------------- */
+.theme-neutral {
+  --page-bg: linear-gradient(180deg, #fdf5f9 0%, #f7f6fd 40%, #f2f6ff 100%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --fast: 0ms;
+    --normal: 0ms;
+  }
+}
