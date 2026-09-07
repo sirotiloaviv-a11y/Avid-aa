@@ -1,13 +1,17 @@
 # Cosher store assets
 
-Product photography for the Cosher fitness store on Shopify. These files are
-served over `raw.githubusercontent.com` and referenced as the product images in
-the store, so moving or renaming them breaks the product pages.
+Source photography for the Cosher fitness store on Shopify.
 
-| File | Product |
-| --- | --- |
-| `foam-roller.jpg` | Foam roller / גליל עיסוי |
-| `nbr-yoga-mat.jpg` | NBR yoga mat / מזרן יוגה NBR |
-| `lifting-hooks.jpg` | Lifting hooks / רצועות הרמה עם וו |
-| `ab-wheel-kit.jpg` | 5-in-1 home gym kit / ערכת כושר 5 ב-1 |
-| `pull-up-bar.jpg` | Doorway pull-up bar / מוט מתח לדלת |
+The Shopify Admin API only accepts product images as publicly reachable HTTPS
+URLs, so these files were served from this public repository during import.
+Shopify has since copied each one onto its own CDN, so the store no longer
+reads from here — this directory is the original set, kept for re-imports and
+edits.
+
+| File | Product | Shopify handle |
+| --- | --- | --- |
+| `foam-roller.jpg` | גליל עיסוי מחורץ | `foam-roller-33` |
+| `nbr-yoga-mat.jpg` | מזרן יוגה NBR | `nbr-yoga-mat-10mm` |
+| `lifting-hooks.jpg` | רצועות הרמה עם ווים | `lifting-hooks-wrist-support` |
+| `ab-wheel-kit.jpg` | ערכת כושר 5 ב-1 | `home-gym-kit-5in1` |
+| `pull-up-bar.jpg` | מוט מתח לדלת | `doorway-pull-up-bar` |
