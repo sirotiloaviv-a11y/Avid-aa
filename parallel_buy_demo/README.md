@@ -63,7 +63,8 @@ good execution algorithm, or an OTC desk — which is what an OTC desk is *for*.
 
 ## Dashboard
 
- is a standalone read-out of the same run — the price each order
-paid, the depth it was buying into, and what each account received for its
-$100,000. Open it in a browser; it carries its own data and needs no server.
- regenerates that data from the simulation.
+`dashboard.html` is a standalone read-out of the same run — the price each order
+paid by arrival position, the book depth against the size being asked for, and
+what each account received for its $100,000. Open it in a browser; it carries
+its own data and needs no server. `export_viz_data.py` regenerates that data
+from the simulation.
