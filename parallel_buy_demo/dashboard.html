@@ -1,0 +1,507 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>html{color-scheme:light dark}body{margin:0;font:14px system-ui}img{max-width:100%}</style></head><body><title>עשרה מיליון בבת אחת</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@500;700;900&family=IBM+Plex+Sans+Hebrew:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+:root{
+  color-scheme: light;
+  --plane:#f4f5f7; --surface:#fbfbfc; --surface-2:#eaedf1;
+  --ink:#0b0b0b; --ink-2:#4e5057; --ink-3:#8a8d94;
+  --rule:#e0e2e7; --rule-strong:#c4c7ce;
+  --par:#eb6834; --sli:#2a78d6;
+  --par-wash:rgba(235,104,52,.11); --sli-wash:rgba(42,120,214,.10);
+  --ord-1:#86b6ef; --ord-2:#5598e7; --ord-3:#2a78d6;
+  --crit:#d03b3b; --crit-ink:#9e2a2a; --crit-wash:rgba(208,59,59,.07);
+  --sans:"IBM Plex Sans Hebrew","Segoe UI",system-ui,sans-serif;
+  --serif:"Frank Ruhl Libre",Georgia,serif;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme: dark;
+    --plane:#0c0d0f; --surface:#17181b; --surface-2:#202226;
+    --ink:#ffffff; --ink-2:#c2c4cb; --ink-3:#8a8d94;
+    --rule:#26282d; --rule-strong:#3a3d44;
+    --par:#d95926; --sli:#3987e5;
+    --par-wash:rgba(217,89,38,.15); --sli-wash:rgba(57,135,229,.13);
+    --ord-1:#256abf; --ord-2:#3987e5; --ord-3:#6da7ec;
+    --crit:#e05a5a; --crit-ink:#f0a0a0; --crit-wash:rgba(224,90,90,.10);
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme: dark;
+  --plane:#0c0d0f; --surface:#17181b; --surface-2:#202226;
+  --ink:#ffffff; --ink-2:#c2c4cb; --ink-3:#8a8d94;
+  --rule:#26282d; --rule-strong:#3a3d44;
+  --par:#d95926; --sli:#3987e5;
+  --par-wash:rgba(217,89,38,.15); --sli-wash:rgba(57,135,229,.13);
+  --ord-1:#256abf; --ord-2:#3987e5; --ord-3:#6da7ec;
+  --crit:#e05a5a; --crit-ink:#f0a0a0; --crit-wash:rgba(224,90,90,.10);
+}
+
+body{ background:var(--plane); color:var(--ink); font-family:var(--sans); font-size:16px; line-height:1.65; }
+*,*::before,*::after{ box-sizing:border-box; }
+
+.page{ direction:rtl; max-width:1080px; margin:0 auto; padding:clamp(28px,5vw,72px) clamp(18px,4vw,40px) 96px; }
+.page > * + *{ margin-block-start:0; }
+
+/* ---- rhythm: sections are separated by gap, not per-element margins ---- */
+.page{ display:flex; flex-direction:column; gap:clamp(48px,6vw,80px); }
+section{ display:flex; flex-direction:column; gap:20px; }
+
+.eyebrow{ font-family:var(--mono); font-size:.74rem; letter-spacing:.14em; text-transform:uppercase;
+  color:var(--ink-3); margin:0; }
+h1{ font-family:var(--serif); font-weight:900; font-size:clamp(2.5rem,7vw,4.1rem); line-height:1.04;
+  letter-spacing:-.01em; margin:.28em 0 0; text-wrap:balance; }
+.lede{ font-size:1.075rem; color:var(--ink-2); max-width:60ch; margin:.7em 0 0; }
+.lede code{ font-family:var(--mono); font-size:.9em; background:var(--surface-2); padding:.1em .34em; border-radius:3px; }
+
+h2{ font-family:var(--serif); font-weight:700; font-size:1.72rem; line-height:1.2; margin:0; text-wrap:balance; }
+.sub{ color:var(--ink-2); margin:0; max-width:62ch; font-size:.965rem; }
+.sec-head{ display:flex; flex-direction:column; gap:6px;
+  border-top:1px solid var(--rule-strong); padding-top:18px; }
+
+/* ---- hero figure ---- */
+.hero{ display:flex; flex-wrap:wrap; align-items:baseline; gap:10px 26px;
+  border-top:2px solid var(--ink); padding-top:22px; }
+.hero .fig{ font-family:var(--sans); font-weight:700; font-size:clamp(3.4rem,10vw,5.2rem);
+  line-height:.95; letter-spacing:-.03em; color:var(--par); }
+.hero .cap{ font-size:1.02rem; color:var(--ink-2); max-width:34ch; }
+.hero .cap strong{ color:var(--ink); font-weight:600; }
+
+/* ---- comparison block ---- */
+.cmp{ background:var(--surface); border:1px solid var(--rule); border-radius:10px; overflow:hidden; }
+.cmp table{ width:100%; border-collapse:collapse; }
+.cmp th,.cmp td{ padding:13px 18px; text-align:right; border-bottom:1px solid var(--rule); }
+.cmp tr:last-child th,.cmp tr:last-child td{ border-bottom:0; }
+.cmp thead th{ font-size:.88rem; font-weight:600; color:var(--ink); background:var(--surface-2);
+  border-bottom:1px solid var(--rule-strong); }
+.cmp thead th:first-child{ color:var(--ink-3); font-weight:500; }
+.cmp tbody th{ font-weight:500; color:var(--ink-2); font-size:.94rem; width:34%; }
+.cmp td{ direction:ltr; font-family:var(--mono); font-variant-numeric:tabular-nums; font-size:.95rem; }
+.cmp .win{ font-weight:600; }
+.key{ display:inline-flex; align-items:center; gap:7px; }
+.key::before{ content:""; width:11px; height:11px; border-radius:3px; background:var(--k,var(--ink-3)); flex:none; }
+.key.par{ --k:var(--par); } .key.sli{ --k:var(--sli); }
+
+/* ---- charts ---- */
+.chart{ position:relative; direction:ltr; background:var(--surface); border:1px solid var(--rule);
+  border-radius:10px; padding:16px 16px 10px; }
+.chart svg{ display:block; width:100%; height:auto; overflow:visible; }
+.legend{ direction:rtl; display:flex; gap:20px; flex-wrap:wrap; font-size:.9rem; color:var(--ink-2); }
+.grid line{ stroke:var(--rule); stroke-width:1; }
+.axis line{ stroke:var(--rule-strong); stroke-width:1; }
+text.ax{ fill:var(--ink-3); font-family:var(--mono); font-size:12px; font-variant-numeric:tabular-nums; }
+text.dl{ fill:var(--ink); font-family:var(--mono); font-size:12.5px; font-weight:600; font-variant-numeric:tabular-nums; }
+text.dl2{ fill:var(--ink-2); font-family:var(--sans); font-size:12px; }
+.s-par{ stroke:var(--par); } .s-sli{ stroke:var(--sli); }
+.f-par{ fill:var(--par); } .f-sli{ fill:var(--sli); }
+.w-par{ fill:var(--par-wash); } .w-sli{ fill:var(--sli-wash); }
+.line{ fill:none; stroke-width:2; stroke-linejoin:round; stroke-linecap:round; }
+.ring{ stroke:var(--surface); stroke-width:2; }
+.hair{ stroke:var(--ink-3); stroke-width:1; }
+.bar-1{ fill:var(--ord-1); } .bar-2{ fill:var(--ord-2); } .bar-3{ fill:var(--ord-3); }
+.refline{ stroke:var(--ink); stroke-width:1.5; }
+
+.tip{ position:absolute; direction:rtl; pointer-events:none; opacity:0; transition:opacity .09s;
+  background:var(--surface); color:var(--ink); border:1px solid var(--rule-strong); border-radius:7px;
+  padding:8px 11px; font-size:.83rem; line-height:1.5; white-space:nowrap;
+  box-shadow:0 6px 20px rgba(0,0,0,.13); z-index:5; }
+.tip b{ font-family:var(--mono); font-weight:600; font-variant-numeric:tabular-nums; }
+.tip .row{ display:flex; gap:9px; align-items:center; justify-content:space-between; }
+.tip .sw{ width:9px; height:9px; border-radius:2px; flex:none; }
+
+/* ---- rejected scenario ---- */
+.reject{ background:var(--crit-wash); border:1px solid var(--crit); border-radius:10px;
+  padding:20px 22px; display:flex; flex-direction:column; gap:12px; }
+.badge{ display:inline-flex; align-items:center; gap:8px; align-self:flex-start;
+  font-size:.82rem; font-weight:600; color:var(--crit-ink); }
+.badge svg{ flex:none; }
+.reject p{ margin:0; color:var(--ink-2); max-width:64ch; }
+.reject .err{ font-family:var(--mono); font-size:.83rem; color:var(--crit-ink); direction:ltr;
+  text-align:left; background:var(--surface); border:1px solid var(--rule); border-radius:6px;
+  padding:10px 12px; overflow-x:auto; }
+code.inl{ font-family:var(--mono); font-size:.88em; background:var(--surface-2); padding:.1em .34em; border-radius:3px; }
+
+/* ---- table view ---- */
+.tbl-wrap{ overflow-x:auto; border:1px solid var(--rule); border-radius:10px; background:var(--surface); }
+table.data{ width:100%; border-collapse:collapse; font-size:.9rem; min-width:560px; }
+table.data th,table.data td{ padding:10px 16px; text-align:right; border-bottom:1px solid var(--rule); }
+table.data tr:last-child td{ border-bottom:0; }
+table.data thead th{ font-weight:600; font-size:.85rem; background:var(--surface-2);
+  border-bottom:1px solid var(--rule-strong); }
+table.data td{ direction:ltr; font-family:var(--mono); font-variant-numeric:tabular-nums; }
+table.data th[scope="row"]{ font-family:var(--sans); font-weight:500; color:var(--ink-2); }
+
+/* ---- footer ---- */
+.repro{ border-top:1px solid var(--rule-strong); padding-top:20px; display:flex; flex-direction:column; gap:12px; }
+.repro pre{ margin:0; direction:ltr; text-align:left; font-family:var(--mono); font-size:.85rem;
+  background:var(--surface); border:1px solid var(--rule); border-radius:8px; padding:13px 15px; overflow-x:auto; }
+.repro p{ margin:0; color:var(--ink-2); font-size:.93rem; max-width:64ch; }
+.files{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:5px;
+  font-family:var(--mono); font-size:.85rem; color:var(--ink-2); direction:ltr; text-align:left; }
+.files b{ color:var(--ink); font-weight:600; }
+
+:focus-visible{ outline:2px solid var(--sli); outline-offset:3px; border-radius:4px; }
+@media (prefers-reduced-motion: reduce){ *{ transition:none !important; } }
+@media (max-width:640px){
+  .cmp th,.cmp td{ padding:11px 12px; font-size:.88rem; }
+  .cmp tbody th{ width:38%; }
+}
+</style>
+<style>
+.cap-ax{ direction:rtl; font-size:.82rem; color:var(--ink-3); margin:0; padding:2px 2px 0; }
+.depth{ direction:rtl; position:relative; --lab:172px; --gapx:16px; padding:4px 2px 0; }
+.depth .rows{ display:grid; grid-template-columns:var(--lab) 1fr; gap:18px var(--gapx);
+  align-items:center; padding-top:26px; padding-bottom:34px; }
+.depth .dlabel{ font-size:.93rem; color:var(--ink-2); white-space:nowrap; }
+.depth .track{ position:relative; height:24px; }
+.depth .fill{ position:absolute; top:0; bottom:0; inset-inline-start:0;
+  border-start-end-radius:4px; border-end-end-radius:4px; }
+.depth .val{ position:absolute; top:50%; transform:translateY(-50%);
+  font-family:var(--mono); font-size:.83rem; font-weight:600; font-variant-numeric:tabular-nums;
+  color:var(--ink); white-space:nowrap; }
+.depth .over{ position:absolute; top:0; bottom:0; inset-inline-start:calc(var(--lab) + var(--gapx));
+  inset-inline-end:0; pointer-events:none; }
+.depth .refline{ position:absolute; top:22px; bottom:30px; width:1.5px; background:var(--ink); }
+.depth .refcap{ position:absolute; top:0; padding-inline-end:9px; white-space:nowrap;
+  font-size:.8rem; color:var(--ink); }
+.depth .refcap b{ font-family:var(--mono); font-weight:600; font-variant-numeric:tabular-nums; }
+.depth .ticks{ position:absolute; inset-inline:0; bottom:6px; display:flex;
+  justify-content:space-between; font-family:var(--mono); font-size:11.5px;
+  font-variant-numeric:tabular-nums; color:var(--ink-3); }
+.depth .axline{ position:absolute; inset-inline:0; bottom:28px; height:1px; background:var(--rule-strong); }
+.depth .fill.bar-1{ background:var(--ord-1); }
+.depth .fill.bar-2{ background:var(--ord-2); }
+.depth .fill.bar-3{ background:var(--ord-3); }
+@media (max-width:620px){ .depth{ --lab:120px; } .depth .dlabel{ font-size:.84rem; white-space:normal; } }
+</style>
+<div class="page" dir="rtl">
+
+  <header>
+    <p class="eyebrow">סימולציה · BTC/USDT · ספר פקודות מקומי</p>
+    <h1>עשרה מיליון בבת אחת</h1>
+    <p class="lede">
+      מה קורה כשמפצלים קנייה של 10,000,000&nbsp;$ בביטקוין ל־100 חשבונות ויורים את כולן דרך
+      <code>asyncio.gather</code>. הבורסה כאן מדומה — ספר פקודות מקומי עם מנוע התאמה סריאלי,
+      בלי רשת, בלי מפתחות ובלי כסף — אבל האילוץ שהיא מדגימה אמיתי: לכל סימבול יש ספר אחד,
+      וההזמנות מסתדרות בתור.
+    </p>
+  </header>
+
+  <div class="hero">
+    <div class="fig">$50,097</div>
+    <p class="cap">
+      נשרפו לסליפג' בהרצה המקבילה. <strong>אותם 10 מיליון, פרוסים לאורך זמן: $1,309.</strong>
+      הפער הוא 0.75 BTC פחות מטבע על אותו כסף בדיוק.
+    </p>
+  </div>
+
+  <section>
+    <div class="sec-head">
+      <h2>שתי דרכים לאותה קנייה</h2>
+      <p class="sub">שני התרחישים הוציאו בדיוק 10,000,000&nbsp;$ מול אותו ספר פקודות פותח.</p>
+    </div>
+    <div class="cmp">
+      <table>
+        <thead>
+          <tr>
+            <th scope="col">מדד</th>
+            <th scope="col"><span class="key par">מקבילי · 100 חשבונות</span></th>
+            <th scope="col"><span class="key sli">פרוס · חשבון אחד, TWAP</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">BTC שנרכשו</th><td>153.0754</td><td class="win">153.8260</td></tr>
+          <tr><th scope="row">מחיר מילוי ממוצע</th><td>$65,327.27</td><td class="win">$65,008.51</td></tr>
+          <tr><th scope="row">סליפג'</th><td>50.3 bps</td><td class="win">1.3 bps</td></tr>
+          <tr><th scope="row">עלות הסליפג'</th><td>$50,097</td><td class="win">$1,309</td></tr>
+          <tr><th scope="row">אסק בסיום ההרצה</th><td>$65,655.50 &nbsp;(+1.01%)</td><td class="win">$65,006.00 &nbsp;(+0.01%)</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <h2>המחיר שכל הזמנה שילמה</h2>
+      <p class="sub">
+        מחיר מילוי ממוצע לפי סדר ההגעה למנוע ההתאמה. בכל הזמנה אותם 100,000&nbsp;$ —
+        ההפרש הוא כולו ההשפעה של ההזמנות שלפניה.
+      </p>
+    </div>
+    <div class="legend">
+      <span class="key par">מקבילי</span>
+      <span class="key sli">פרוס (TWAP)</span>
+    </div>
+    <div class="chart" id="c1"><div class="tip" id="t1"></div></div>
+    <p class="cap-ax">ציר אופקי: מקום ההזמנה בתור (1–100). ציר אנכי: מחיר מילוי ממוצע, USDT.</p>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <h2>כמה נזילות באמת יש שם</h2>
+      <p class="sub">
+        BTC זמין בתוך טווח נתון מהאסק הטוב, ברגע שלפני ההזמנה הראשונה. הסולם עצמו הוא
+        0.35&nbsp;BTC בכל צעד של 1.50&nbsp;$.
+      </p>
+    </div>
+    <div class="chart">
+      <div class="depth">
+        <div class="over">
+          <div class="axline"></div>
+          <div class="refline" style="inset-inline-start:76.54%"></div>
+          <div class="refcap" style="inset-inline-end:23.46%"><b>153.08 BTC</b> — גודל ההזמנה</div>
+          <div class="ticks"><span>0</span><span>50</span><span>100</span><span>150</span><span>200</span></div>
+        </div>
+        <div class="rows">
+          <div class="dlabel">בתוך 0.1% מהאסק</div>
+          <div class="track">
+            <div class="fill bar-1" style="width:7.70%"></div>
+            <div class="val" style="inset-inline-start:calc(7.70% + 10px)">15.40 BTC</div>
+          </div>
+          <div class="dlabel">בתוך 0.5% מהאסק</div>
+          <div class="track">
+            <div class="fill bar-2" style="width:37.98%"></div>
+            <div class="val" style="inset-inline-start:calc(37.98% + 10px)">75.95 BTC</div>
+          </div>
+          <div class="dlabel">בתוך 1.0% מהאסק</div>
+          <div class="track">
+            <div class="fill bar-3" style="width:75.95%"></div>
+            <div class="val" style="inset-inline-start:calc(76.54% + 12px)">151.90 BTC</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="cap-ax">ציר אופקי: BTC זמין במצטבר. הקו האנכי מסמן את גודל ההזמנה.</p>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <h2>מי הגיע ראשון</h2>
+      <p class="sub">
+        בהרצה המקבילה כל חשבון שלח 100,000&nbsp;$ — וקיבל כמות אחרת, לפי מקומו בתור.
+        <code class="inl">asyncio.gather</code> מפעיל את כולם יחד; הבורסה מתאימה אותם אחד־אחד.
+      </p>
+    </div>
+    <div class="chart" id="c3"><div class="tip" id="t3"></div></div>
+    <p class="cap-ax">ציר אופקי: מקום ההזמנה בתור. ציר אנכי: BTC שהתקבלו על 100,000 $ — שימו לב שהוא לא מתחיל באפס.</p>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <h2>התרחיש שלא הגיע לספר</h2>
+      <p class="sub">הקוד המקורי, לפני תיקון הגודל.</p>
+    </div>
+    <div class="reject">
+      <span class="badge">
+        <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="7" fill="none" stroke="currentColor" stroke-width="1.6"></circle><path d="M5.5 5.5l5 5M10.5 5.5l-5 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" fill="none"></path></svg>
+        נדחה · 100 מתוך 100 ההזמנות
+      </span>
+      <p>
+        <code class="inl">create_market_buy_order(symbol, amount)</code> ב־ccxt מקבל את
+        <code class="inl">amount</code> ב<strong>מטבע הבסיס</strong>. הערך <code class="inl">100000</code>,
+        שנועד להיות מאה אלף דולר, מבקש בפועל 100,000 ביטקוין — כ־6.5 מיליארד דולר לחשבון,
+        650 מיליארד בסך הכול. כדי להוציא סכום דולרי צריך
+        <code class="inl">params={'quoteOrderQty': 100000}</code>.
+      </p>
+      <div class="err">amount 100,000 BTC exceeds max order size 9,000 BTC (filter MARKET_LOT_SIZE)</div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <h2>מה לא מודל כאן</h2>
+    </div>
+    <p class="sub" style="max-width:64ch">
+      בקוד המקורי כל אחד מ־100 החשבונות קיבל מפתח API משלו ופרוקסי משלו, עם הערה
+      <code class="inl"># מונע חסימת IP</code>. זה לא נבנה כאן, ולא רק מטעמי תנאי שימוש:
+      פיצול הון בין חשבונות מאחורי פרוקסים כדי לעקוף מגבלות לכל חשבון מפר את תנאי בינאנס
+      ונוגע ב־KYC/AML. גם אילו נבנה, הוא לא היה עוזר — כפי שהגרפים למעלה מראים, האילוץ הוא
+      ספר הפקודות המשותף, לא כתובת המקור.
+    </p>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <h2>כל המספרים</h2>
+      <p class="sub">אותם ערכים שהגרפים מציירים, לקריאה ישירה.</p>
+    </div>
+    <div class="tbl-wrap">
+      <table class="data">
+        <thead>
+          <tr><th scope="col">שדה</th><th scope="col">מקבילי</th><th scope="col">פרוס</th><th scope="col">כפי שנכתב</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">הזמנות שמולאו</th><td>100</td><td>100</td><td>0</td></tr>
+          <tr><th scope="row">USDT שהוצאו</th><td>$10,000,000</td><td>$10,000,000</td><td>$0</td></tr>
+          <tr><th scope="row">BTC שנרכשו</th><td>153.0754</td><td>153.8260</td><td>0</td></tr>
+          <tr><th scope="row">אסק פותח</th><td>$65,000.00</td><td>$65,000.00</td><td>$65,000.00</td></tr>
+          <tr><th scope="row">מחיר מילוי ממוצע</th><td>$65,327.27</td><td>$65,008.51</td><td>—</td></tr>
+          <tr><th scope="row">מילוי ראשון</th><td>$65,002.59</td><td>$65,002.59</td><td>—</td></tr>
+          <tr><th scope="row">מילוי אחרון</th><td>$65,652.06</td><td>$65,008.59</td><td>—</td></tr>
+          <tr><th scope="row">אסק בסיום</th><td>$65,655.50</td><td>$65,006.00</td><td>$65,000.00</td></tr>
+          <tr><th scope="row">סליפג'</th><td>50.3 bps</td><td>1.3 bps</td><td>—</td></tr>
+          <tr><th scope="row">עלות הסליפג'</th><td>$50,097</td><td>$1,309</td><td>—</td></tr>
+          <tr><th scope="row">עומק בתוך 0.1%</th><td colspan="3">15.40 BTC</td></tr>
+          <tr><th scope="row">עומק בתוך 0.5%</th><td colspan="3">75.95 BTC</td></tr>
+          <tr><th scope="row">עומק בתוך 1.0%</th><td colspan="3">151.90 BTC</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="repro">
+    <p>ההרצה דטרמיניסטית — ספר הפקודות נזרע ב־<code class="inl">seed=7</code>, ושתי הרצות נותנות את אותם מספרים.</p>
+    <pre>python -m parallel_buy_demo.demo</pre>
+    <ul class="files">
+      <li><b>parallel_buy_demo/mock_exchange.py</b> — ספר פקודות עם מנוע התאמה סריאלי</li>
+      <li><b>parallel_buy_demo/demo.py</b> — שלושת התרחישים</li>
+      <li><b>parallel_buy_demo/README.md</b> — ההסבר המלא</li>
+    </ul>
+    <p>ענף <code class="inl">claude/parallel-bitcoin-buy-j9yf7j</code>. אין בקוד נתיב מסחר חי להפעלה.</p>
+  </section>
+
+</div>
+<script>
+(function(){
+  "use strict";
+  var D = {"p":{"avg":[65002.59,65009.13,65015.73,65022.34,65028.88,65035.54,65042.09,65048.67,65055.29,65061.83,65068.47,65075.03,65081.6,65088.23,65094.76,65101.39,65107.96,65114.5,65121.15,65127.68,65134.28,65140.87,65147.4,65154.05,65160.58,65167.16,65173.77,65180.29,65186.91,65193.47,65200.01,65206.65,65213.17,65219.76,65226.34,65232.86,65239.5,65246.03,65252.58,65259.2,65265.72,65272.31,65278.88,65285.4,65292.04,65298.56,65305.11,65311.72,65318.23,65324.82,65331.38,65337.9,65344.53,65351.05,65357.59,65364.19,65370.7,65377.28,65383.85,65390.35,65396.97,65403.49,65410.01,65416.63,65423.13,65429.69,65436.27,65442.77,65449.36,65455.9,65462.4,65469.02,65475.53,65482.05,65488.65,65495.15,65501.7,65508.27,65514.77,65521.35,65527.89,65534.38,65540.99,65547.49,65554.0,65560.6,65567.1,65573.63,65580.2,65586.69,65593.25,65599.8,65606.29,65612.86,65619.39,65625.87,65632.46,65638.97,65645.46,65652.06],"btc":[1.5384,1.5382,1.5381,1.5379,1.5378,1.5376,1.5375,1.5373,1.5372,1.537,1.5368,1.5367,1.5365,1.5364,1.5362,1.5361,1.5359,1.5358,1.5356,1.5354,1.5353,1.5351,1.535,1.5348,1.5347,1.5345,1.5344,1.5342,1.5341,1.5339,1.5337,1.5336,1.5334,1.5333,1.5331,1.533,1.5328,1.5327,1.5325,1.5324,1.5322,1.532,1.5319,1.5317,1.5316,1.5314,1.5313,1.5311,1.531,1.5308,1.5307,1.5305,1.5304,1.5302,1.53,1.5299,1.5297,1.5296,1.5294,1.5293,1.5291,1.529,1.5288,1.5287,1.5285,1.5284,1.5282,1.5281,1.5279,1.5277,1.5276,1.5274,1.5273,1.5271,1.527,1.5268,1.5267,1.5265,1.5264,1.5262,1.5261,1.5259,1.5258,1.5256,1.5255,1.5253,1.5252,1.525,1.5249,1.5247,1.5245,1.5244,1.5242,1.5241,1.5239,1.5238,1.5236,1.5235,1.5233,1.5232],"acct":["acct078","acct008","acct056","acct021","acct006","acct034","acct033","acct070","acct082","acct010","acct003","acct011","acct088","acct025","acct014","acct051","acct081","acct084","acct024","acct001","acct054","acct099","acct080","acct028","acct035","acct015","acct044","acct085","acct094","acct023","acct049","acct075","acct041","acct026","acct038","acct061","acct000","acct005","acct096","acct031","acct076","acct019","acct086","acct052","acct012","acct095","acct037","acct009","acct040","acct089","acct065","acct079","acct068","acct055","acct007","acct046","acct004","acct032","acct090","acct018","acct045","acct059","acct029","acct064","acct039","acct063","acct016","acct030","acct002","acct072","acct069","acct057","acct077","acct036","acct062","acct043","acct071","acct048","acct053","acct058","acct083","acct042","acct027","acct013","acct092","acct074","acct066","acct022","acct093","acct047","acct060","acct087","acct091","acct097","acct017","acct067","acct098","acct020","acct050","acct073"]},"t":{"avg":[65002.59,65005.86,65007.42,65008.59,65008.59,65008.71,65008.59,65008.59,65008.65,65008.59,65008.59,65008.65,65008.59,65008.59,65008.65,65008.59,65008.59,65008.69,65008.59,65008.59,65008.65,65008.59,65008.59,65008.65,65008.59,65008.59,65008.65,65008.59,65008.59,65008.65,65008.59,65008.59,65008.65,65008.59,65008.59,65008.69,65008.59,65008.59,65008.65,65008.59,65008.59,65008.65,65008.59,65008.59,65008.65,65008.59,65008.59,65008.65,65008.59,65008.59,65008.65,65008.59,65008.59,65008.69,65008.59,65008.59,65008.65,65008.59,65008.59,65008.65,65008.59,65008.59,65008.65,65008.59,65008.59,65008.65,65008.59,65008.59,65008.65,65008.59,65008.59,65008.69,65008.59,65008.59,65008.65,65008.59,65008.59,65008.65,65008.59,65008.59,65008.65,65008.59,65008.59,65008.65,65008.59,65008.59,65008.65,65008.59,65008.59,65008.69,65008.59,65008.59,65008.65,65008.59,65008.59,65008.65,65008.59,65008.59,65008.65,65008.59]},"sum":{"parallel":{"n":100,"btc":153.0754,"spent":10000000.0,"start":65000.0,"avg":65327.2692,"final_ask":65655.5,"slip_pct":0.5035,"slip_usd":50096.8712},"twap":{"n":100,"btc":153.826,"spent":10000000.0,"start":65000.0,"avg":65008.5108,"final_ask":65006.0,"slip_pct":0.0131,"slip_usd":1309.1839}},"book":{"best_ask":65000.0,"depth_01":15.4,"depth_05":75.95,"depth_1":151.9,"tick":1.5,"level":0.35}};
+
+  function usd(n, dp){ return "$" + n.toLocaleString("en-US", {minimumFractionDigits: dp||0, maximumFractionDigits: dp||0}); }
+  function path(pts){ return "M" + pts.map(function(p){ return p[0].toFixed(1) + " " + p[1].toFixed(1); }).join("L"); }
+
+  /* ---------- chart 1: average fill price by arrival order ---------- */
+  function fillPriceChart(){
+    var W = 920, H = 400, mT = 24, mR = 108, mB = 46, mL = 74;
+    var y0 = 64950, y1 = 65700, n = D.p.avg.length;
+    var px = function(i){ return mL + (i / (n - 1)) * (W - mL - mR); };
+    var py = function(v){ return mT + (1 - (v - y0) / (y1 - y0)) * (H - mT - mB); };
+
+    var s = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="מחיר מילוי ממוצע לכל הזמנה, שתי אסטרטגיות">';
+    s += '<g class="grid">';
+    [65000, 65200, 65400, 65600].forEach(function(v){
+      s += '<line x1="' + mL + '" x2="' + (W - mR) + '" y1="' + py(v) + '" y2="' + py(v) + '"></line>';
+      s += '<text class="ax" x="' + (mL - 12) + '" y="' + (py(v) + 4) + '" text-anchor="end">' + v.toLocaleString("en-US") + '</text>';
+    });
+    s += '</g>';
+    s += '<g class="axis"><line x1="' + mL + '" x2="' + (W - mR) + '" y1="' + (H - mB) + '" y2="' + (H - mB) + '"></line></g>';
+    [0, 24, 49, 74, 99].forEach(function(i){
+      s += '<text class="ax" x="' + px(i) + '" y="' + (H - mB + 22) + '" text-anchor="middle">' + (i + 1) + '</text>';
+    });
+
+    var ptsP = D.p.avg.map(function(v, i){ return [px(i), py(v)]; });
+    var ptsT = D.t.avg.map(function(v, i){ return [px(i), py(v)]; });
+    s += '<path class="line s-sli" d="' + path(ptsT) + '"></path>';
+    s += '<path class="line s-par" d="' + path(ptsP) + '"></path>';
+
+    var lastP = ptsP[n - 1], lastT = ptsT[n - 1];
+    s += '<circle class="f-sli ring" cx="' + lastT[0] + '" cy="' + lastT[1] + '" r="4.5"></circle>';
+    s += '<circle class="f-par ring" cx="' + lastP[0] + '" cy="' + lastP[1] + '" r="4.5"></circle>';
+    s += '<text class="dl" x="' + (W - mR + 12) + '" y="' + (lastP[1] + 4) + '">' + usd(D.p.avg[n - 1], 0) + '</text>';
+    s += '<text class="dl" x="' + (W - mR + 12) + '" y="' + (lastT[1] + 4) + '">' + usd(D.t.avg[n - 1], 0) + '</text>';
+
+    s += '<g id="c1cross" style="opacity:0">';
+    s += '<line class="hair" id="c1hair" x1="0" x2="0" y1="' + mT + '" y2="' + (H - mB) + '"></line>';
+    s += '<circle class="f-sli ring" id="c1dt" cx="0" cy="0" r="5"></circle>';
+    s += '<circle class="f-par ring" id="c1dp" cx="0" cy="0" r="5"></circle>';
+    s += '</g></svg>';
+
+    var host = document.getElementById("c1");
+    host.insertAdjacentHTML("beforeend", s);
+    var svg = host.querySelector("svg"), tip = document.getElementById("t1");
+    var cross = document.getElementById("c1cross"), hair = document.getElementById("c1hair");
+    var dp = document.getElementById("c1dp"), dt = document.getElementById("c1dt");
+
+    function move(clientX){
+      var r = svg.getBoundingClientRect(), hr = host.getBoundingClientRect();
+      var vx = (clientX - r.left) / r.width * W;
+      var i = Math.round((vx - mL) / (W - mL - mR) * (n - 1));
+      i = Math.max(0, Math.min(n - 1, i));
+      cross.style.opacity = 1;
+      hair.setAttribute("x1", px(i)); hair.setAttribute("x2", px(i));
+      dp.setAttribute("cx", px(i)); dp.setAttribute("cy", py(D.p.avg[i]));
+      dt.setAttribute("cx", px(i)); dt.setAttribute("cy", py(D.t.avg[i]));
+      tip.innerHTML =
+        '<div style="color:var(--ink-3);font-family:var(--mono);font-size:.78rem">מקום ' + (i + 1) + ' בתור · ' + D.p.acct[i] + '</div>' +
+        '<div class="row"><span><span class="sw" style="background:var(--par);display:inline-block"></span> מקבילי</span><b>' + usd(D.p.avg[i], 2) + '</b></div>' +
+        '<div class="row"><span><span class="sw" style="background:var(--sli);display:inline-block"></span> פרוס</span><b>' + usd(D.t.avg[i], 2) + '</b></div>';
+      tip.style.opacity = 1;
+      var left = (r.left - hr.left) + px(i) / W * r.width;
+      var w = tip.offsetWidth;
+      left = Math.max(w / 2 + 4, Math.min(hr.width - w / 2 - 4, left));
+      tip.style.left = left + "px";
+      tip.style.top = ((r.top - hr.top) + py(D.t.avg[i]) / H * r.height) + "px";
+      tip.style.transform = "translate(-50%,-118%)";
+    }
+    svg.addEventListener("mousemove", function(e){ move(e.clientX); });
+    svg.addEventListener("touchmove", function(e){ if (e.touches[0]) move(e.touches[0].clientX); }, {passive: true});
+    svg.addEventListener("mouseleave", function(){ cross.style.opacity = 0; tip.style.opacity = 0; });
+  }
+
+  /* ---------- chart 3: BTC received per $100k, by queue position ---------- */
+  function perAccountChart(){
+    var W = 920, H = 300, mT = 30, mR = 96, mB = 46, mL = 74;
+    var y0 = 1.520, y1 = 1.542, n = D.p.btc.length;
+    var px = function(i){ return mL + (i / (n - 1)) * (W - mL - mR); };
+    var py = function(v){ return mT + (1 - (v - y0) / (y1 - y0)) * (H - mT - mB); };
+
+    var s = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="BTC שהתקבלו על 100,000 דולר לפי מקום בתור">';
+    s += '<g class="grid">';
+    [1.522, 1.528, 1.534, 1.540].forEach(function(v){
+      s += '<line x1="' + mL + '" x2="' + (W - mR) + '" y1="' + py(v) + '" y2="' + py(v) + '"></line>';
+      s += '<text class="ax" x="' + (mL - 12) + '" y="' + (py(v) + 4) + '" text-anchor="end">' + v.toFixed(3) + '</text>';
+    });
+    s += '</g>';
+    s += '<g class="axis"><line x1="' + mL + '" x2="' + (W - mR) + '" y1="' + (H - mB) + '" y2="' + (H - mB) + '"></line></g>';
+    [0, 24, 49, 74, 99].forEach(function(i){
+      s += '<text class="ax" x="' + px(i) + '" y="' + (H - mB + 22) + '" text-anchor="middle">' + (i + 1) + '</text>';
+    });
+
+    var pts = D.p.btc.map(function(v, i){ return [px(i), py(v)]; });
+    var area = path(pts) + "L" + px(n - 1).toFixed(1) + " " + (H - mB) + "L" + px(0).toFixed(1) + " " + (H - mB) + "Z";
+    s += '<path class="w-par" d="' + area + '"></path>';
+    s += '<path class="line s-par" d="' + path(pts) + '"></path>';
+    s += '<circle class="f-par ring" cx="' + pts[0][0] + '" cy="' + pts[0][1] + '" r="4.5"></circle>';
+    s += '<circle class="f-par ring" cx="' + pts[n - 1][0] + '" cy="' + pts[n - 1][1] + '" r="4.5"></circle>';
+    s += '<text class="dl" x="' + (px(0) + 12) + '" y="' + (pts[0][1] - 12) + '">' + D.p.btc[0].toFixed(4) + '</text>';
+    s += '<text class="dl" x="' + (W - mR + 12) + '" y="' + (pts[n - 1][1] + 4) + '">' + D.p.btc[n - 1].toFixed(4) + '</text>';
+
+    s += '<g id="c3cross" style="opacity:0">';
+    s += '<line class="hair" id="c3hair" x1="0" x2="0" y1="' + mT + '" y2="' + (H - mB) + '"></line>';
+    s += '<circle class="f-par ring" id="c3d" cx="0" cy="0" r="5"></circle>';
+    s += '</g></svg>';
+
+    var host = document.getElementById("c3");
+    host.insertAdjacentHTML("beforeend", s);
+    var svg = host.querySelector("svg"), tip = document.getElementById("t3");
+    var cross = document.getElementById("c3cross"), hair = document.getElementById("c3hair"), dot = document.getElementById("c3d");
+
+    function move(clientX){
+      var r = svg.getBoundingClientRect(), hr = host.getBoundingClientRect();
+      var vx = (clientX - r.left) / r.width * W;
+      var i = Math.round((vx - mL) / (W - mL - mR) * (n - 1));
+      i = Math.max(0, Math.min(n - 1, i));
+      cross.style.opacity = 1;
+      hair.setAttribute("x1", px(i)); hair.setAttribute("x2", px(i));
+      dot.setAttribute("cx", px(i)); dot.setAttribute("cy", py(D.p.btc[i]));
+      tip.innerHTML =
+        '<div style="color:var(--ink-3);font-family:var(--mono);font-size:.78rem">מקום ' + (i + 1) + ' בתור · ' + D.p.acct[i] + '</div>' +
+        '<div class="row"><span>התקבלו</span><b>' + D.p.btc[i].toFixed(4) + ' BTC</b></div>' +
+        '<div class="row"><span>מחיר ממוצע</span><b>' + usd(D.p.avg[i], 2) + '</b></div>';
+      tip.style.opacity = 1;
+      var left = (r.left - hr.left) + px(i) / W * r.width;
+      var w = tip.offsetWidth;
+      left = Math.max(w / 2 + 4, Math.min(hr.width - w / 2 - 4, left));
+      tip.style.left = left + "px";
+      tip.style.top = ((r.top - hr.top) + py(D.p.btc[i]) / H * r.height) + "px";
+      tip.style.transform = "translate(-50%,-118%)";
+    }
+    svg.addEventListener("mousemove", function(e){ move(e.clientX); });
+    svg.addEventListener("touchmove", function(e){ if (e.touches[0]) move(e.touches[0].clientX); }, {passive: true});
+    svg.addEventListener("mouseleave", function(){ cross.style.opacity = 0; tip.style.opacity = 0; });
+  }
+
+  fillPriceChart();
+  perAccountChart();
+})();
+</script>
+</body></html>
