@@ -1,0 +1,3 @@
+# Runtime dependencies for the trading console.
+streamlit>=1.32
+pandas>=2.0
