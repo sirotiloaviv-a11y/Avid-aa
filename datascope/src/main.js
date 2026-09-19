@@ -146,6 +146,15 @@ function requestRender() {
   });
 }
 
+/**
+ * True when the page is served by a local server, which is the only place the
+ * `/api/yahoo` proxy exists.
+ */
+function isLocalOrigin() {
+  const host = globalThis.location?.hostname ?? '';
+  return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '';
+}
+
 function isCompact() {
   return Boolean(globalThis.matchMedia?.('(max-width: 720px)')?.matches);
 }
@@ -262,6 +271,18 @@ function connectStocks() {
     // The trade stream carries no day open, so one REST quote per symbol seeds
     // the day-change figures the cards show.
     seedFinnhubQuotes(symbols, token);
+    return;
+  }
+
+  // The Yahoo path is served by this project's own local server. When the page
+  // is hosted anywhere else that route does not exist, so say so once instead of
+  // retrying a 404 forever behind a growing backoff.
+  if (state.config.yahooRest.startsWith('/') && !isLocalOrigin()) {
+    setSourceStatus(
+      'stock',
+      CONNECTION.OFFLINE,
+      'דרוש שרת מקומי (npm start) או מפתח Finnhub בהגדרות',
+    );
     return;
   }
 
