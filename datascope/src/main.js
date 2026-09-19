@@ -1,595 +1,906 @@
 /**
- * DataScope controller.
+ * DataScope controller: connect the feeds, keep one state object, render from it.
  *
- * One state object, one `render()`. Every panel - statistics, both charts, the
- * summary, the table and both exports - is derived from the same
- * `selectRows(state)` result on every render, which is what keeps them from ever
- * showing different periods or different numbers.
+ * The shape of the app is a loop:
+ *   provider frame -> parse -> MarketStore -> (render | alert engine)
  *
- * Nothing here writes to localStorage, sessionStorage, IndexedDB or cookies: the
- * imported data lives in memory for the life of the tab and is gone on reload.
+ * Two loops run on timers rather than on every frame, because a busy pair sends
+ * several messages a second and neither the DOM nor the alert engine needs to
+ * see all of them:
+ *   - rendering is coalesced into one requestAnimationFrame per burst,
+ *   - the alert engine runs on a fixed 1s tick, which also gives time-window
+ *     rules a predictable cadence.
+ *
+ * Alert rules, history and settings persist in localStorage. Nothing is sent
+ * anywhere except to the market data providers themselves.
  */
 
-import { validateDataset, LIMITS } from './lib/validate.js';
-import { computeStats } from './lib/stats.js';
-import {
-  normalizeRange,
-  paginate,
-  searchSymbols,
-  selectRows,
-  sortRows,
-  symbolBounds,
-} from './lib/selection.js';
-import { buildSummary } from './lib/summary.js';
-import { buildCsv, buildTextReport, safeFileName } from './lib/exporters.js';
-import { DEMO_FILE_NAME, generateDemoCsv } from './lib/demo.js';
-import { formatBytes, formatDate, formatInteger, todayIso } from './lib/format.js';
+import { CONNECTION, assetKey } from './lib/model.js';
+import { MarketStore, intradayStats, topMovers } from './lib/market.js';
+import { AssetRegistry, DEFAULT_WATCHLIST, buildAsset, searchAssets } from './lib/assets.js';
+import { AlertHistory, RULE_TYPE, createRule, runAlertEngine, validateRule } from './lib/alerts.js';
+import { configFromSearch, resolveProviders } from './lib/config.js';
+import { KEYS, clearAll, loadSettings, readJson, saveSettings, writeJson } from './lib/storage.js';
+import { buildHistoryCsv, safeFileName } from './lib/exporters.js';
+import { formatAge, formatClock, todayIso } from './lib/format.js';
 import { byId, clear, downloadText, el, show } from './ui/dom.js';
 import { renderPriceChart, renderVolumeChart } from './ui/charts.js';
-import { renderTable } from './ui/table.js';
-import {
-  renderSourceBanner,
-  renderStats,
-  renderSummary,
-  renderValidationReport,
-} from './ui/panels.js';
+import { renderConnectionPills, renderIntradayStats, renderWatchCards } from './ui/dashboard.js';
+import { renderTicker } from './ui/ticker.js';
+import { fillAssetOptions, renderHistory, renderRules, showRuleErrors } from './ui/alerts-ui.js';
+import { Notifier, PERMISSION } from './ui/notifications.js';
 
-/** @typedef {'asc'|'desc'} SortDirection */
+import * as binance from './providers/binance.js';
+import * as finnhub from './providers/finnhub.js';
+import * as yahoo from './providers/yahoo.js';
+import * as coingecko from './providers/coingecko.js';
+import { PollingSource, ReconnectingSocket } from './providers/connection.js';
+
+const ALERT_TICK_MS = 1_000;
 
 const state = {
-  /** @type {any} */
-  dataset: null,
-  isDemo: false,
-  /** @type {string|null} */
-  selectedSymbol: null,
-  /** @type {string|null} */
-  from: null,
-  /** @type {string|null} */
-  to: null,
-  /** @type {'date'|'close'|'volume'} */
-  sortKey: 'date',
-  /** @type {SortDirection} */
-  sortDirection: 'asc',
-  page: 1,
-  pageSize: 25,
+  config: null,
+  settings: null,
+  market: new MarketStore(),
+  /** The searchable universe, which is larger than the watchlist. */
+  universe: new AssetRegistry(),
+  /** @type {import('./lib/alerts.js').AlertRule[]} */
+  rules: [],
+  history: new AlertHistory(200),
+  /** @type {Record<string, string|null>} */
+  diagnostics: {},
+  selectedKey: null,
+  searchResults: [],
+  searchIndex: -1,
+  classFilter: 'all',
+  /** @type {{asset: any, quote: any}[]} */
+  movers: [],
+  sources: {
+    crypto: { id: 'crypto', label: 'קריפטו', status: CONNECTION.IDLE, detail: '', silenceMs: null, stale: false },
+    stock: { id: 'stock', label: 'מניות', status: CONNECTION.IDLE, detail: '', silenceMs: null, stale: false },
+  },
 };
 
 const ui = {};
+const connections = { cryptoSocket: null, stockSocket: null, stockPoll: null, moversPoll: null };
+let notifier = null;
+let renderQueued = false;
+
+/* ------------------------------------------------------------------ helpers */
 
 function cacheElements() {
   const ids = [
-    'dropzone',
-    'file-input',
-    'file-button',
-    'load-demo',
-    'download-sample',
-    'clear-data',
-    'loading',
-    'loading-text',
-    'status-message',
-    'validation-report',
-    'empty-state',
-    'analysis',
-    'source-banner',
-    'symbol-search',
-    'symbol-select',
-    'symbol-count',
-    'date-from',
-    'date-to',
-    'reset-range',
-    'range-message',
-    'no-results',
-    'no-results-text',
-    'results',
-    'stats-grid',
+    'ticker',
+    'connection-pills',
+    'enable-notifications',
+    'toggle-sound',
+    'toggle-settings',
+    'settings-panel',
+    'finnhub-token',
+    'save-token',
+    'clear-token',
+    'clear-storage',
+    'settings-status',
+    'asset-search',
+    'asset-results',
+    'class-filter',
+    'watch-cards',
+    'detail-name',
+    'detail-symbol',
+    'detail-source',
+    'intraday-stats',
     'price-chart',
     'price-tooltip',
     'volume-chart',
     'volume-tooltip',
     'chart-readout',
-    'summary-body',
-    'export-csv',
-    'export-report',
-    'page-size',
-    'page-prev',
-    'page-next',
-    'page-info',
-    'table-container',
+    'chart-empty',
+    'notification-state',
+    'rule-form',
+    'rule-asset',
+    'rule-type',
+    'rule-window',
+    'rule-cooldown',
+    'rule-form-status',
+    'rule-list',
+    'history-list',
+    'export-history',
+    'clear-history',
+    'toast-stack',
   ];
-  for (const id of ids) {
-    ui[id] = byId(id);
-  }
+  for (const id of ids) ui[id] = byId(id);
 }
 
-/* ------------------------------------------------------------------ states */
-
-function setLoading(isLoading, text = 'קורא את הקובץ…') {
-  ui['loading-text'].textContent = text;
-  show(ui.loading, isLoading);
-  ui['file-button'].disabled = isLoading;
-  ui['load-demo'].disabled = isLoading;
-}
-
-function setStatus(message) {
-  if (!message) {
-    ui['status-message'].textContent = '';
-    show(ui['status-message'], false);
-    return;
-  }
-  ui['status-message'].textContent = message;
-  show(ui['status-message'], true);
-}
-
-function clearValidationReport() {
-  clear(ui['validation-report']);
-  show(ui['validation-report'], false);
-}
-
-/* ------------------------------------------------------------------- import */
-
-async function handleFile(file) {
-  clearValidationReport();
-  setStatus('');
-
-  if (!file) return;
-
-  // Checked before reading: a 2 GB file should be refused, not loaded into
-  // memory first and refused afterwards.
-  if (file.size > LIMITS.MAX_BYTES) {
-    showBlockedImport(
-      {
-        issues: [
-          {
-            kind: 'file-size',
-            row: null,
-            column: null,
-            value: null,
-            message: `הקובץ שנבחר במשקל ${formatBytes(
-              file.size,
-            )}, והמותר הוא עד 5 מ״ב. יש לפצל את הקובץ או לצמצם את טווח התאריכים שבו.`,
-          },
-        ],
-        issueCount: 1,
-        truncatedIssues: false,
-        warnings: [],
-      },
-      file.name,
-    );
-    return;
-  }
-
-  setLoading(true);
-  try {
-    // Yield once so the loading state actually paints before a large parse.
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    const text = await file.text();
-    const result = validateDataset(text, { fileName: file.name, byteSize: file.size });
-    if (!result.ok) {
-      showBlockedImport(result, file.name);
-      return;
-    }
-    applyDataset(result.dataset, { isDemo: false, warnings: result.warnings });
-  } catch (error) {
-    showBlockedImport(
-      {
-        issues: [
-          {
-            kind: 'read-error',
-            row: null,
-            column: null,
-            value: null,
-            message: `לא ניתן לקרוא את הקובץ: ${error instanceof Error ? error.message : 'שגיאה לא מזוהה'}. יש לוודא שהקובץ הוא טקסט בקידוד UTF-8.`,
-          },
-        ],
-        issueCount: 1,
-        truncatedIssues: false,
-        warnings: [],
-      },
-      file?.name ?? '',
-    );
-  } finally {
-    setLoading(false);
-  }
-}
-
-function showBlockedImport(result, fileName) {
-  renderValidationReport(ui['validation-report'], result, fileName);
-  show(ui['validation-report'], true);
-  setStatus('');
-  // An earlier successful import is left untouched: a failed new import should
-  // not silently wipe the data the user is already looking at.
-  ui['validation-report'].focus?.();
-}
-
-function loadDemo() {
-  clearValidationReport();
-  // The demo goes through the very same validator as a user file, so a broken
-  // generator shows up as a blocked import instead of as trusted-looking data.
-  const csv = generateDemoCsv();
-  const result = validateDataset(csv, {
-    fileName: DEMO_FILE_NAME,
-    byteSize: new TextEncoder().encode(csv).length,
+/** Coalesces render requests into one frame. */
+function requestRender() {
+  if (renderQueued) return;
+  renderQueued = true;
+  const schedule = globalThis.requestAnimationFrame ?? ((fn) => setTimeout(fn, 16));
+  schedule(() => {
+    renderQueued = false;
+    render();
   });
-  if (!result.ok) {
-    showBlockedImport(result, DEMO_FILE_NAME);
-    return;
-  }
-  applyDataset(result.dataset, { isDemo: true, warnings: result.warnings });
 }
 
-function downloadSample() {
-  const csv = generateDemoCsv();
-  downloadText(safeFileName('sample', todayIso(), 'csv'), csv, 'text/csv');
-  setStatus(
-    'הורד קובץ CSV לדוגמה עם נתוני הדגמה מומצאים (DEMO_A, DEMO_B, DEMO_C). אפשר לטעון אותו חזרה כדי לבדוק את מסלול הייבוא.',
+function isCompact() {
+  return Boolean(globalThis.matchMedia?.('(max-width: 720px)')?.matches);
+}
+
+/** @param {string} url */
+async function getJson(url, { signal } = {}) {
+  const response = await fetch(url, { signal, headers: { accept: 'application/json' } });
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status} מ־${new URL(url, location.href).host || 'השרת המקומי'}`);
+  }
+  return response.json();
+}
+
+/* --------------------------------------------------------------- connectors */
+
+function cryptoSymbols() {
+  return state.market
+    .watchlist()
+    .filter((asset) => asset.provider === 'binance')
+    .map((asset) => asset.symbol);
+}
+
+function stockSymbols() {
+  return state.market
+    .watchlist()
+    .filter((asset) => asset.assetClass === 'stock')
+    .map((asset) => asset.symbol);
+}
+
+function setSourceStatus(id, status, detail) {
+  const source = state.sources[id];
+  source.status = status;
+  source.detail = detail ?? '';
+  requestRender();
+}
+
+function connectCrypto() {
+  connections.cryptoSocket?.close();
+  const symbols = cryptoSymbols();
+  if (symbols.length === 0) {
+    connections.cryptoSocket = null;
+    setSourceStatus('crypto', CONNECTION.IDLE, 'אין נכסי קריפטו במעקב');
+    return;
+  }
+
+  connections.cryptoSocket = new ReconnectingSocket({
+    url: () => binance.streamUrl(cryptoSymbols(), { ws: state.config.binanceWs }),
+    onStatus: (status, detail) => setSourceStatus('crypto', status, detail),
+    onMessage: (text) => {
+      const parsed = binance.parseSocketMessage(text);
+      if (!parsed) return;
+      if (parsed.kind === 'quote') {
+        state.market.applyQuote(parsed.quote);
+      } else if (parsed.kind === 'candle') {
+        state.market.applyCandle(parsed.key, parsed.candle);
+      }
+      requestRender();
+    },
+  });
+  connections.cryptoSocket.open();
+  backfillCrypto(symbols);
+}
+
+/** Seeds the chart so it is not empty for the first minutes after a reload. */
+async function backfillCrypto(symbols) {
+  for (const symbol of symbols) {
+    try {
+      const payload = await getJson(
+        binance.endpoints.klines(symbol, '1m', 240, state.config.binanceRest),
+      );
+      const candles = binance.parseRestKlines(payload);
+      if (candles.length > 0) state.market.seedSeries(assetKey('binance', symbol), candles);
+      requestRender();
+    } catch {
+      // A failed backfill is not fatal: the live stream fills the chart in.
+    }
+  }
+}
+
+function connectStocks() {
+  connections.stockSocket?.close();
+  connections.stockPoll?.stop();
+  connections.stockSocket = null;
+  connections.stockPoll = null;
+
+  const symbols = stockSymbols();
+  if (symbols.length === 0) {
+    setSourceStatus('stock', CONNECTION.IDLE, 'אין מניות במעקב');
+    return;
+  }
+
+  const providers = resolveProviders({ finnhubToken: state.settings.finnhubToken });
+
+  if (providers.stock === 'finnhub') {
+    const token = state.settings.finnhubToken;
+    connections.stockSocket = new ReconnectingSocket({
+      url: () => finnhub.socketUrl(token, state.config.finnhubWs),
+      onStatus: (status, detail) => setSourceStatus('stock', status, detail),
+      onOpen: (socket) => {
+        for (const symbol of stockSymbols()) socket.send(finnhub.subscribeMessage(symbol));
+      },
+      onMessage: (text) => {
+        const parsed = finnhub.parseSocketMessage(text);
+        if (!parsed) return;
+        if (parsed.kind === 'trades') {
+          for (const trade of parsed.trades) state.market.applyTrade(trade);
+          requestRender();
+        } else if (parsed.kind === 'error') {
+          setSourceStatus('stock', CONNECTION.ERROR, parsed.message);
+        }
+      },
+    });
+    connections.stockSocket.open();
+    // The trade stream carries no day open, so one REST quote per symbol seeds
+    // the day-change figures the cards show.
+    seedFinnhubQuotes(symbols, token);
+    return;
+  }
+
+  connections.stockPoll = new PollingSource({
+    intervalMs: state.config.stockPollMs,
+    onStatus: (status, detail) => setSourceStatus('stock', status, detail),
+    poll: async () => {
+      for (const symbol of stockSymbols()) {
+        const payload = await getJson(
+          yahoo.endpoints.chart(symbol, { rest: state.config.yahooRest }),
+        );
+        const error = yahoo.parseChartError(payload);
+        if (error) throw new Error(error);
+
+        const quote = yahoo.parseChartQuote(payload);
+        if (quote) state.market.applyQuote(quote);
+
+        const candles = yahoo.parseChartCandles(payload);
+        if (candles.length > 0) state.market.seedSeries(assetKey('yahoo', symbol), candles);
+
+        const meta = yahoo.parseChartAsset(payload);
+        if (meta?.name) {
+          state.market.registry.upsert({
+            ...buildAsset({ provider: 'yahoo', symbol, assetClass: 'stock', currency: meta.currency ?? 'USD' }),
+            name: meta.name,
+          });
+        }
+      }
+      requestRender();
+    },
+  });
+  connections.stockPoll.start();
+}
+
+async function seedFinnhubQuotes(symbols, token) {
+  for (const symbol of symbols) {
+    try {
+      const payload = await getJson(finnhub.endpoints.quote(symbol, token, state.config.finnhubRest));
+      const quote = finnhub.parseQuote(symbol, payload);
+      if (quote) state.market.applyQuote(quote);
+
+      const profile = await getJson(
+        finnhub.endpoints.profile(symbol, token, state.config.finnhubRest),
+      );
+      const parsed = finnhub.parseProfile(profile);
+      if (parsed.name) {
+        state.market.registry.upsert({
+          ...buildAsset({ provider: 'finnhub', symbol, assetClass: 'stock', currency: parsed.currency ?? 'USD' }),
+          name: parsed.name,
+        });
+      }
+      requestRender();
+    } catch {
+      // Quotes will still arrive over the socket; only the day-open is missing.
+    }
+  }
+}
+
+/** The ticker bar: biggest movers across crypto, refreshed on its own slow loop. */
+function startMoversPoll() {
+  connections.moversPoll?.stop();
+  connections.moversPoll = new PollingSource({
+    intervalMs: state.config.moversPollMs,
+    poll: async () => {
+      const payload = await getJson(binance.endpoints.tickers(null, state.config.binanceRest));
+      const quotes = binance.parseRestTickers(payload);
+      const rows = [];
+      for (const quote of quotes) {
+        const asset = state.universe.get(quote.key) ?? state.market.registry.get(quote.key);
+        // Only pairs quoted in USDT, or the list is dominated by the same coin
+        // priced against a dozen different quote currencies.
+        if (!asset || asset.currency !== 'USDT') continue;
+        rows.push({ asset, quote });
+      }
+      state.movers = topMovers(rows, { limit: 14 });
+      requestRender();
+    },
+  });
+  connections.moversPoll.start();
+}
+
+/** One-time loads: the tradable universe and the crypto name table. */
+async function loadUniverse() {
+  try {
+    const payload = await getJson(binance.endpoints.exchangeInfo(state.config.binanceRest));
+    const assets = binance.parseExchangeInfo(payload, { quoteAssets: ['USDT', 'USDC'] });
+    for (const asset of assets) state.universe.upsert(asset);
+  } catch {
+    // Search then falls back to whatever is already on the watchlist.
+  }
+
+  try {
+    const payload = await getJson(coingecko.endpoints.coinList(state.config.coingeckoRest));
+    const names = coingecko.parseCoinList(payload);
+    state.universe.addNames(names);
+    state.market.registry.addNames(names);
+  } catch {
+    // Names stay unresolved; the UI shows symbols alone rather than guesses.
+  }
+  requestRender();
+}
+
+/* ------------------------------------------------------------------- search */
+
+let searchTimer = null;
+
+function onSearchInput() {
+  const query = ui['asset-search'].value.trim();
+  const classFilter = state.classFilter === 'all' ? null : state.classFilter;
+
+  state.searchResults = searchAssets(
+    [...state.universe.list(), ...state.market.watchlist()],
+    query,
+    { assetClass: classFilter, limit: 12 },
+  );
+  state.searchIndex = -1;
+  renderSearchResults();
+
+  // Remote stock search is debounced: it is a network call per keystroke
+  // otherwise, against a free tier.
+  if (searchTimer) clearTimeout(searchTimer);
+  if (query.length >= 2 && state.classFilter !== 'crypto') {
+    searchTimer = setTimeout(() => searchStocks(query), 300);
+  }
+}
+
+async function searchStocks(query) {
+  try {
+    const token = state.settings.finnhubToken;
+    const assets = token
+      ? finnhub.parseSearch(
+          await getJson(finnhub.endpoints.search(query, token, state.config.finnhubRest)),
+        )
+      : yahoo.parseSearch(
+          await getJson(yahoo.endpoints.search(query, { rest: state.config.yahooRest })),
+        );
+
+    for (const asset of assets) state.universe.upsert(asset);
+    if (ui['asset-search'].value.trim() === query) onSearchInput();
+  } catch {
+    // Local results stand.
+  }
+}
+
+function renderSearchResults() {
+  const list = ui['asset-results'];
+  clear(list);
+
+  if (state.searchResults.length === 0) {
+    show(list, false);
+    ui['asset-search'].setAttribute('aria-expanded', 'false');
+    return;
+  }
+
+  state.searchResults.forEach((asset, index) => {
+    const item = el('li', { attrs: { role: 'none' } });
+    const button = el('button', {
+      class: `asset-option${index === state.searchIndex ? ' is-active' : ''}`,
+      attrs: { type: 'button', role: 'option', 'aria-selected': index === state.searchIndex ? 'true' : 'false' },
+    });
+    button.append(el('span', { class: 'asset-option-symbol', text: asset.displaySymbol, attrs: { dir: 'ltr' } }));
+    button.append(el('span', { class: 'asset-option-name', text: asset.name ?? '—' }));
+    button.append(
+      el('span', {
+        class: `asset-chip chip-${asset.assetClass}`,
+        text: asset.assetClass === 'crypto' ? 'קריפטו' : 'מניה',
+      }),
+    );
+    button.addEventListener('click', () => addToWatchlist(asset));
+    item.append(button);
+    list.append(item);
+  });
+
+  show(list, true);
+  ui['asset-search'].setAttribute('aria-expanded', 'true');
+}
+
+function onSearchKeydown(event) {
+  if (state.searchResults.length === 0) return;
+  switch (event.key) {
+    case 'ArrowDown':
+      state.searchIndex = Math.min(state.searchResults.length - 1, state.searchIndex + 1);
+      break;
+    case 'ArrowUp':
+      state.searchIndex = Math.max(0, state.searchIndex - 1);
+      break;
+    case 'Enter':
+      if (state.searchIndex >= 0) {
+        addToWatchlist(state.searchResults[state.searchIndex]);
+        event.preventDefault();
+      }
+      return;
+    case 'Escape':
+      state.searchResults = [];
+      renderSearchResults();
+      return;
+    default:
+      return;
+  }
+  event.preventDefault();
+  renderSearchResults();
+}
+
+/* ---------------------------------------------------------------- watchlist */
+
+function addToWatchlist(asset) {
+  if (!asset) return;
+  const added = state.market.watch(asset);
+  state.selectedKey = added.key;
+  ui['asset-search'].value = '';
+  state.searchResults = [];
+  renderSearchResults();
+  persistWatchlist();
+  reconnectFor(added);
+  requestRender();
+}
+
+function removeFromWatchlist(key) {
+  const asset = state.market.registry.get(key);
+  state.market.unwatch(key);
+  if (state.selectedKey === key) {
+    state.selectedKey = state.market.watchOrder[0] ?? null;
+  }
+  persistWatchlist();
+  if (asset?.assetClass === 'crypto') connectCrypto();
+  else connectStocks();
+  requestRender();
+}
+
+function reconnectFor(asset) {
+  if (asset.assetClass === 'crypto') connectCrypto();
+  else connectStocks();
+}
+
+function persistWatchlist() {
+  writeJson(
+    KEYS.WATCHLIST,
+    state.market.watchlist().map((asset) => ({
+      provider: asset.provider,
+      symbol: asset.symbol,
+      assetClass: asset.assetClass,
+      base: asset.baseAsset ?? asset.symbol,
+      currency: asset.currency,
+      name: asset.name,
+    })),
   );
 }
 
-function applyDataset(dataset, { isDemo, warnings }) {
-  state.dataset = dataset;
-  state.isDemo = isDemo;
-  state.selectedSymbol = dataset.symbols[0] ?? null;
-  state.sortKey = 'date';
-  state.sortDirection = 'asc';
-  state.page = 1;
-  ui['symbol-search'].value = '';
-  resetRangeToSymbol();
+/* ------------------------------------------------------------------- alerts */
 
-  const parts = [
-    `נטענו ${formatInteger(dataset.rowCount)} שורות תקפות מהקובץ ${dataset.fileName}`,
-    `${formatInteger(dataset.symbols.length)} סמלים`,
-    `טווח ${formatDate(dataset.firstDate)}–${formatDate(dataset.lastDate)}`,
-  ];
-  if (warnings?.length) parts.push(warnings.join(' '));
-  setStatus(`${parts.join(' · ')}.`);
+function onRuleSubmit(event) {
+  event.preventDefault();
+  const form = ui['rule-form'];
+  const data = new FormData(form);
+  const type = String(data.get('type'));
 
-  ui['clear-data'].disabled = false;
-  render();
+  const input = {
+    assetKey: String(data.get('assetKey') ?? ''),
+    type,
+    cooldownMs: Number(data.get('cooldownMs')),
+    note: String(data.get('note') ?? ''),
+  };
+
+  if (type === RULE_TYPE.PRICE) {
+    input.direction = String(data.get('direction'));
+    input.target = Number(data.get('target'));
+  } else if (type === RULE_TYPE.PERCENT) {
+    input.thresholdPct = Number(data.get('thresholdPct'));
+    input.move = String(data.get('move'));
+    input.basis = String(data.get('basis'));
+    input.windowMs = Number(data.get('windowMs'));
+  } else if (type === RULE_TYPE.VOLUME) {
+    input.multiple = Number(data.get('multiple'));
+    input.windowMs = Number(data.get('windowMs'));
+    input.baselineWindows = 12;
+  }
+
+  const errors = validateRule(input);
+  showRuleErrors(form, errors);
+  if (Object.keys(errors).length > 0) {
+    ui['rule-form-status'].textContent = 'יש לתקן את השדות המסומנים.';
+    return;
+  }
+
+  state.rules = [...state.rules, createRule(input)];
+  persistRules();
+  const asset = state.market.registry.get(input.assetKey);
+  ui['rule-form-status'].textContent = `ההתראה נוספה עבור ${asset?.displaySymbol ?? input.assetKey}.`;
+  form.querySelector('[name="note"]').value = '';
+  requestRender();
 }
 
-function clearAll() {
-  state.dataset = null;
-  state.isDemo = false;
-  state.selectedSymbol = null;
-  state.from = null;
-  state.to = null;
-  state.page = 1;
-  state.sortKey = 'date';
-  state.sortDirection = 'asc';
-
-  ui['file-input'].value = '';
-  ui['symbol-search'].value = '';
-  ui['date-from'].value = '';
-  ui['date-to'].value = '';
-  clear(ui['symbol-select']);
-  clear(ui['stats-grid']);
-  clear(ui['price-chart']);
-  clear(ui['volume-chart']);
-  clear(ui['summary-body']);
-  clear(ui['table-container']);
-  clear(ui['source-banner']);
-  ui['chart-readout'].textContent = '';
-  ui['price-tooltip'].hidden = true;
-  ui['volume-tooltip'].hidden = true;
-  ui['clear-data'].disabled = true;
-  clearValidationReport();
-  setStatus('הנתונים נמחקו. לא נשמר דבר בדפדפן.');
-  render();
+function persistRules() {
+  writeJson(KEYS.RULES, state.rules);
 }
 
-/* ------------------------------------------------------------------ filters */
-
-function resetRangeToSymbol() {
-  const bounds = state.selectedSymbol
-    ? symbolBounds(state.dataset?.rows ?? [], state.selectedSymbol)
-    : null;
-  state.from = bounds?.firstDate ?? null;
-  state.to = bounds?.lastDate ?? null;
-  state.page = 1;
+function persistHistory() {
+  writeJson(KEYS.HISTORY, state.history.entries.slice(0, 100));
 }
 
-function syncRangeInputs() {
-  const bounds = state.selectedSymbol
-    ? symbolBounds(state.dataset?.rows ?? [], state.selectedSymbol)
-    : null;
-  for (const [key, input] of [
-    ['from', ui['date-from']],
-    ['to', ui['date-to']],
-  ]) {
-    if (bounds) {
-      input.min = bounds.firstDate;
-      input.max = bounds.lastDate;
-    } else {
-      input.removeAttribute('min');
-      input.removeAttribute('max');
-    }
-    input.value = state[key] ?? '';
+/** The engine tick: evaluate, notify, log. */
+function alertTick() {
+  if (state.rules.length === 0) return;
+  const now = Date.now();
+  const { rules, events, diagnostics } = runAlertEngine({
+    rules: state.rules,
+    contextFor: (key) => state.market.contextFor(key),
+    now,
+  });
+
+  state.rules = rules;
+  state.diagnostics = diagnostics;
+
+  if (events.length > 0) {
+    for (const event of events) notifier.notify(event);
+    state.history.add(events);
+    persistRules();
+    persistHistory();
+    requestRender();
+  } else if (Object.keys(diagnostics).length > 0) {
+    requestRender();
   }
 }
 
-function renderSymbolOptions() {
-  const symbols = state.dataset?.symbols ?? [];
-  const matches = searchSymbols(symbols, ui['symbol-search'].value);
-  const select = ui['symbol-select'];
-  clear(select);
+/**
+ * The in-page fallback when a desktop notification cannot be shown - the alert
+ * still has to be visible to someone looking at the tab.
+ * @param {import('./lib/alerts.js').AlertEvent} event
+ */
+function showToast(event) {
+  const toast = el('div', { class: 'toast' });
+  toast.append(el('div', { class: 'toast-title', text: event.title }));
+  toast.append(el('div', { class: 'toast-body', text: event.body }));
+  ui['toast-stack'].append(toast);
+  setTimeout(() => toast.remove(), 12_000);
+}
 
-  for (const symbol of matches) {
-    // textContent via el(), so a symbol containing markup is shown as text.
-    select.append(el('option', { text: symbol, attrs: { value: symbol } }));
-  }
+function updateNotificationState() {
+  const node = ui['notification-state'];
+  const permission = notifier.permission;
 
-  if (matches.length === 0) {
-    select.append(el('option', { text: 'אין סמל תואם', attrs: { value: '', disabled: 'disabled' } }));
-    ui['symbol-count'].textContent = `אין סמל שתואם לחיפוש. בקובץ יש ${formatInteger(symbols.length)} סמלים.`;
+  if (permission === PERMISSION.GRANTED) {
+    node.textContent =
+      'התראות הדפדפן פעילות. התראה תופיע גם כשהלשונית ברקע, עם שם הנכס המלא והסמל.';
+    node.classList.remove('is-blocked');
+    ui['enable-notifications'].disabled = true;
+    ui['enable-notifications'].textContent = 'התראות מופעלות';
+  } else if (permission === PERMISSION.DENIED) {
+    node.textContent =
+      'הדפדפן חוסם התראות עבור האתר הזה. ההתראות עדיין ייכתבו בהיסטוריה ויוצגו בתוך הדף, אך לא יופיעו מחוץ לדפדפן. כדי לאפשר: יש ללחוץ על סמל המנעול בשורת הכתובת ולאשר «התראות».';
+    node.classList.add('is-blocked');
+    ui['enable-notifications'].disabled = true;
+    ui['enable-notifications'].textContent = 'התראות חסומות';
+  } else if (permission === PERMISSION.UNSUPPORTED) {
+    node.textContent = 'הדפדפן אינו תומך בהתראות. ההתראות יוצגו בתוך הדף ובהיסטוריה בלבד.';
+    node.classList.add('is-blocked');
+    ui['enable-notifications'].disabled = true;
   } else {
-    ui['symbol-count'].textContent = `${formatInteger(matches.length)} מתוך ${formatInteger(
-      symbols.length,
-    )} סמלים תואמים לחיפוש.`;
-  }
-
-  if (state.selectedSymbol && matches.includes(state.selectedSymbol)) {
-    select.value = state.selectedSymbol;
-  } else if (matches.length > 0) {
-    select.value = matches[0];
+    node.textContent =
+      'כדי לקבל התראות גם כשהלשונית ברקע, יש ללחוץ «הפעלת התראות בדפדפן» ולאשר את הבקשה.';
+    node.classList.remove('is-blocked');
+    ui['enable-notifications'].disabled = false;
   }
 }
 
 /* ------------------------------------------------------------------- render */
 
-/** Phone-width layout: the charts switch to a taller, sparser geometry. */
-const compactQuery =
-  typeof window !== 'undefined' && window.matchMedia
-    ? window.matchMedia('(max-width: 640px)')
-    : null;
+function render() {
+  const now = Date.now();
 
-function isCompactViewport() {
-  return Boolean(compactQuery?.matches);
+  // Connection pills, including the staleness check.
+  const crypto = state.sources.crypto;
+  const stock = state.sources.stock;
+  crypto.silenceMs = connections.cryptoSocket?.silenceMs() ?? null;
+  crypto.stale = connections.cryptoSocket?.isStale() ?? false;
+  stock.silenceMs = null;
+  stock.stale = connections.stockSocket?.isStale() ?? false;
+  renderConnectionPills(ui['connection-pills'], [crypto, stock]);
+
+  // Ticker: live movers when the poll has produced them, the watchlist until then.
+  const tickerRows =
+    state.movers.length > 0
+      ? state.movers
+      : state.market
+          .watchlist()
+          .map((asset) => ({ asset, quote: state.market.quote(asset.key) }))
+          .filter((row) => row.quote);
+  renderTicker(ui.ticker, topMovers(tickerRows, { limit: 14 }), { onSelect: selectAsset });
+
+  // Watchlist cards.
+  const rows = state.market.watchlist().map((asset) => ({
+    asset,
+    quote: state.market.quote(asset.key),
+    age: state.market.ageOf(asset.key, now),
+  }));
+  renderWatchCards(ui['watch-cards'], rows, {
+    selectedKey: state.selectedKey,
+    onSelect: selectAsset,
+    onRemove: removeFromWatchlist,
+  });
+
+  renderDetail(now);
+
+  fillAssetOptions(ui['rule-asset'], state.market.watchlist(), ui['rule-asset'].value || state.selectedKey);
+  renderRules(ui['rule-list'], state.rules, {
+    assetFor: (key) => state.market.registry.get(key),
+    diagnostics: state.diagnostics,
+    onToggle: (id, enabled) => {
+      state.rules = state.rules.map((rule) =>
+        // Re-arm on enable, so a rule switched back on does not fire instantly
+        // on a condition that was already true while it was off.
+        rule.id === id ? { ...rule, enabled, armed: true } : rule,
+      );
+      persistRules();
+      requestRender();
+    },
+    onDelete: (id) => {
+      state.rules = state.rules.filter((rule) => rule.id !== id);
+      persistRules();
+      requestRender();
+    },
+  });
+
+  renderHistory(ui['history-list'], state.history.entries);
 }
 
-function render() {
-  const hasData = Boolean(state.dataset);
-  show(ui['empty-state'], !hasData);
-  show(ui.analysis, hasData);
-  if (!hasData) return;
+function renderDetail(now) {
+  const key = state.selectedKey;
+  const asset = key ? state.market.registry.get(key) : null;
 
-  renderSourceBanner(ui['source-banner'], { dataset: state.dataset, isDemo: state.isDemo });
-  renderSymbolOptions();
-  syncRangeInputs();
-
-  const range = normalizeRange({ from: state.from, to: state.to });
-  if (range.inverted) {
-    ui['range-message'].textContent =
-      'תאריך ההתחלה מאוחר מתאריך הסיום, ולכן אין תצפיות להצגה. יש להחליף ביניהם או לאפס את הטווח.';
-    show(ui['range-message'], true);
-  } else {
-    show(ui['range-message'], false);
-  }
-
-  const symbol = state.selectedSymbol;
-  const filtered = range.inverted
-    ? []
-    : selectRows(state.dataset.rows, { symbol, from: range.from, to: range.to });
-  const stats = computeStats(filtered);
-
-  const hasRows = filtered.length > 0;
-  show(ui['no-results'], !hasRows);
-  show(ui.results, hasRows);
-
-  if (!hasRows) {
-    const bounds = symbol ? symbolBounds(state.dataset.rows, symbol) : null;
-    ui['no-results-text'].textContent = bounds
-      ? `לסמל ${symbol} אין תצפיות בטווח ${formatDate(range.from)} – ${formatDate(range.to)}. ` +
-        `הטווח הזמין לסמל זה הוא ${formatDate(bounds.firstDate)} – ${formatDate(bounds.lastDate)}, ובו ${formatInteger(
-          bounds.count,
-        )} תצפיות. תאריכים חסרים בתוך הטווח אינם שגיאה.`
-      : 'לא נבחר סמל, ולכן אין נתונים להצגה.';
-    ui['chart-readout'].textContent = '';
-    ui['price-tooltip'].hidden = true;
-    ui['volume-tooltip'].hidden = true;
+  if (!asset) {
+    ui['detail-name'].textContent = '—';
+    ui['detail-symbol'].textContent = '';
+    ui['detail-source'].textContent = '';
+    clear(ui['intraday-stats']);
+    clear(ui['price-chart']);
+    clear(ui['volume-chart']);
+    show(ui['chart-empty'], true);
     return;
   }
 
-  renderStats(ui['stats-grid'], stats);
+  ui['detail-name'].textContent = asset.name ?? asset.displaySymbol;
+  ui['detail-symbol'].textContent = asset.name ? asset.displaySymbol : '';
 
-  const chartOptions = {
-    symbol,
-    readout: ui['chart-readout'],
-    minDate: stats.minCloseDate,
-    maxDate: stats.maxCloseDate,
-    compact: isCompactViewport(),
-  };
-  renderPriceChart(ui['price-chart'], filtered, {
-    ...chartOptions,
-    tooltip: ui['price-tooltip'],
-  });
-  renderVolumeChart(ui['volume-chart'], filtered, {
-    ...chartOptions,
-    tooltip: ui['volume-tooltip'],
-  });
+  const quote = state.market.quote(key);
+  const series = state.market.series.peek(key);
+  const stats = intradayStats(quote, series);
 
-  const summary = buildSummary({
-    symbol,
-    fileName: state.dataset.fileName,
-    isDemo: state.isDemo,
-    requestedRange: { from: range.from, to: range.to },
-    stats,
-  });
-  renderSummary(ui['summary-body'], summary);
+  const age = state.market.ageOf(key, now);
+  ui['detail-source'].textContent = [
+    `מקור: ${sourceLabel(asset.provider)}`,
+    stats.delayed ? 'ייתכן עיכוב' : 'זמן אמת',
+    age === null ? 'ממתין לנתונים' : `עודכן ${formatAge(age)} (${formatClock(stats.ts)})`,
+  ].join(' · ');
 
-  const sorted = sortRows(filtered, state.sortKey, state.sortDirection);
-  const pageData = paginate(sorted, state.page, state.pageSize);
-  state.page = pageData.page;
-  renderTable(
-    ui['table-container'],
-    pageData,
-    { sortKey: state.sortKey, sortDirection: state.sortDirection, symbol },
-    handleSort,
-  );
+  renderIntradayStats(ui['intraday-stats'], stats, asset);
 
-  ui['page-info'].textContent = `עמוד ${pageData.page} מתוך ${pageData.pageCount}`;
-  ui['page-prev'].disabled = pageData.page <= 1;
-  ui['page-next'].disabled = pageData.page >= pageData.pageCount;
+  const candles = series?.candles ?? [];
+  show(ui['chart-empty'], candles.length === 0);
 
-  ui['export-csv'].disabled = false;
-  ui['export-report'].disabled = false;
-  ui['export-csv'].dataset.rowCount = String(filtered.length);
-}
-
-function handleSort(key) {
-  if (state.sortKey === key) {
-    state.sortDirection = state.sortDirection === 'asc' ? 'desc' : 'asc';
+  const label = asset.name ? `${asset.name} / ${asset.displaySymbol}` : asset.displaySymbol;
+  const compact = isCompact();
+  if (candles.length > 0) {
+    renderPriceChart(ui['price-chart'], candles, {
+      label,
+      tooltip: ui['price-tooltip'],
+      readout: ui['chart-readout'],
+      compact,
+      referencePrice: stats.prevClose ?? stats.open ?? null,
+    });
+    renderVolumeChart(ui['volume-chart'], candles, {
+      label,
+      tooltip: ui['volume-tooltip'],
+      readout: ui['chart-readout'],
+      compact,
+    });
   } else {
-    state.sortKey = key;
-    state.sortDirection = key === 'date' ? 'asc' : 'desc';
+    clear(ui['price-chart']);
+    clear(ui['volume-chart']);
   }
-  state.page = 1;
-  render();
 }
 
-/* ------------------------------------------------------------------ exports */
-
-function currentSelection() {
-  const range = normalizeRange({ from: state.from, to: state.to });
-  const rows = range.inverted
-    ? []
-    : selectRows(state.dataset.rows, {
-        symbol: state.selectedSymbol,
-        from: range.from,
-        to: range.to,
-      });
-  return { range, rows, stats: computeStats(rows) };
+function sourceLabel(provider) {
+  return { binance: 'Binance', finnhub: 'Finnhub', yahoo: 'Yahoo Finance', coingecko: 'CoinGecko' }[
+    provider
+  ] ?? provider;
 }
 
-function exportCsv() {
-  if (!state.dataset || !state.selectedSymbol) return;
-  const { rows } = currentSelection();
-  const fileName = safeFileName(state.selectedSymbol, todayIso(), 'csv');
-  downloadText(fileName, buildCsv(rows), 'text/csv');
-  setStatus(`הורדו ${formatInteger(rows.length)} שורות מסוננות לקובץ ${fileName}.`);
+function selectAsset(key) {
+  state.selectedKey = key;
+  const settings = { ...state.settings, selectedKey: key };
+  state.settings = settings;
+  saveSettings(settings);
+  requestRender();
 }
 
-function exportReport() {
-  if (!state.dataset || !state.selectedSymbol) return;
-  const { range, rows, stats } = currentSelection();
-  const summary = buildSummary({
-    symbol: state.selectedSymbol,
-    fileName: state.dataset.fileName,
-    isDemo: state.isDemo,
-    requestedRange: range,
-    stats,
-  });
-  const generatedAt = todayIso();
-  const report = buildTextReport({
-    symbol: state.selectedSymbol,
-    fileName: state.dataset.fileName,
-    isDemo: state.isDemo,
-    requestedRange: range,
-    stats,
-    summary,
-    generatedAt,
-  });
-  const fileName = safeFileName(state.selectedSymbol, generatedAt, 'txt');
-  downloadText(fileName, report, 'text/plain');
-  setStatus(`הורד דוח בעברית עבור ${state.selectedSymbol} (${formatInteger(rows.length)} תצפיות) לקובץ ${fileName}.`);
-}
-
-/* -------------------------------------------------------------------- wiring */
+/* ------------------------------------------------------------------- wiring */
 
 function wireEvents() {
-  ui['file-button'].addEventListener('click', () => ui['file-input'].click());
-  ui['file-input'].addEventListener('change', (event) => {
-    const file = event.target.files?.[0];
-    handleFile(file);
-  });
-
-  const dropzone = ui.dropzone;
-  const setDragging = (active) => dropzone.classList.toggle('dragging', active);
-  for (const type of ['dragenter', 'dragover']) {
-    dropzone.addEventListener(type, (event) => {
-      event.preventDefault();
-      setDragging(true);
-    });
-  }
-  for (const type of ['dragleave', 'dragend']) {
-    dropzone.addEventListener(type, () => setDragging(false));
-  }
-  dropzone.addEventListener('drop', (event) => {
-    event.preventDefault();
-    setDragging(false);
-    const file = event.dataTransfer?.files?.[0];
-    handleFile(file);
-  });
-  // Without this, dropping a file anywhere else navigates away from the app.
-  for (const type of ['dragover', 'drop']) {
-    window.addEventListener(type, (event) => {
-      if (!dropzone.contains(event.target)) event.preventDefault();
-    });
-  }
-
-  ui['load-demo'].addEventListener('click', loadDemo);
-  ui['download-sample'].addEventListener('click', downloadSample);
-  ui['clear-data'].addEventListener('click', clearAll);
-
-  ui['symbol-search'].addEventListener('input', () => {
-    renderSymbolOptions();
-    const select = ui['symbol-select'];
-    if (select.value && select.value !== state.selectedSymbol) {
-      state.selectedSymbol = select.value;
-      resetRangeToSymbol();
-      render();
+  ui['asset-search'].addEventListener('input', onSearchInput);
+  ui['asset-search'].addEventListener('keydown', onSearchKeydown);
+  ui['asset-search'].addEventListener('focus', onSearchInput);
+  document.addEventListener('click', (event) => {
+    if (!ui['asset-results'].contains(event.target) && event.target !== ui['asset-search']) {
+      show(ui['asset-results'], false);
+      ui['asset-search'].setAttribute('aria-expanded', 'false');
     }
   });
 
-  ui['symbol-select'].addEventListener('change', (event) => {
-    const value = event.target.value;
-    if (!value) return;
-    state.selectedSymbol = value;
-    resetRangeToSymbol();
-    render();
+  ui['class-filter'].addEventListener('change', (event) => {
+    state.classFilter = event.target.value;
+    onSearchInput();
   });
 
-  ui['date-from'].addEventListener('change', (event) => {
-    state.from = event.target.value || null;
-    state.page = 1;
-    render();
-  });
-  ui['date-to'].addEventListener('change', (event) => {
-    state.to = event.target.value || null;
-    state.page = 1;
-    render();
-  });
-  ui['reset-range'].addEventListener('click', () => {
-    resetRangeToSymbol();
-    render();
+  ui['rule-form'].addEventListener('submit', onRuleSubmit);
+  ui['rule-type'].addEventListener('change', syncRuleFields);
+
+  ui['enable-notifications'].addEventListener('click', async () => {
+    await notifier.requestPermission();
+    state.settings = { ...state.settings, notificationsRequested: true };
+    saveSettings(state.settings);
+    updateNotificationState();
   });
 
-  ui['page-size'].addEventListener('change', (event) => {
-    state.pageSize = Number(event.target.value) || 25;
-    state.page = 1;
-    render();
-  });
-  ui['page-prev'].addEventListener('click', () => {
-    state.page = Math.max(1, state.page - 1);
-    render();
-  });
-  ui['page-next'].addEventListener('click', () => {
-    state.page += 1;
-    render();
+  ui['toggle-sound'].addEventListener('click', () => {
+    const enabled = !notifier.soundEnabled;
+    notifier.soundEnabled = enabled;
+    if (enabled) notifier.unlockAudio();
+    state.settings = { ...state.settings, soundEnabled: enabled };
+    saveSettings(state.settings);
+    ui['toggle-sound'].textContent = enabled ? '🔔 צליל פעיל' : '🔕 צליל כבוי';
+    ui['toggle-sound'].setAttribute('aria-pressed', enabled ? 'true' : 'false');
   });
 
-  ui['export-csv'].addEventListener('click', exportCsv);
-  ui['export-report'].addEventListener('click', exportReport);
-
-  // Crossing the phone breakpoint changes the chart geometry, so redraw.
-  compactQuery?.addEventListener('change', () => {
-    if (state.dataset) render();
+  ui['toggle-settings'].addEventListener('click', () => {
+    const hidden = ui['settings-panel'].hidden;
+    show(ui['settings-panel'], hidden);
+    ui['toggle-settings'].setAttribute('aria-expanded', hidden ? 'true' : 'false');
   });
+
+  ui['save-token'].addEventListener('click', () => {
+    const token = ui['finnhub-token'].value.trim();
+    state.settings = { ...state.settings, finnhubToken: token || null };
+    saveSettings(state.settings);
+    ui['settings-status'].textContent = token
+      ? 'המפתח נשמר בדפדפן. מתחבר מחדש למניות דרך Finnhub…'
+      : 'המפתח נמחק. מתחבר מחדש למניות דרך Yahoo.';
+    connectStocks();
+  });
+
+  ui['clear-token'].addEventListener('click', () => {
+    ui['finnhub-token'].value = '';
+    state.settings = { ...state.settings, finnhubToken: null };
+    saveSettings(state.settings);
+    ui['settings-status'].textContent = 'המפתח נמחק מהדפדפן. מתחבר מחדש דרך Yahoo.';
+    connectStocks();
+  });
+
+  ui['clear-storage'].addEventListener('click', () => {
+    clearAll();
+    state.rules = [];
+    state.history.clear();
+    ui['settings-status'].textContent =
+      'כל הנתונים השמורים נמחקו מהדפדפן: כללי התראות, היסטוריה, מפתח והגדרות.';
+    requestRender();
+  });
+
+  ui['export-history'].addEventListener('click', () => {
+    if (state.history.entries.length === 0) return;
+    const fileName = safeFileName('alerts', todayIso(), 'csv');
+    downloadText(fileName, buildHistoryCsv(state.history.entries), 'text/csv');
+  });
+
+  ui['clear-history'].addEventListener('click', () => {
+    state.history.clear();
+    persistHistory();
+    requestRender();
+  });
+
+  globalThis.matchMedia?.('(max-width: 720px)')?.addEventListener('change', requestRender);
+
+  // A tab restored from the background may have missed reconnect timers.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') requestRender();
+  });
+}
+
+/** Shows only the fields that belong to the selected rule type. */
+function syncRuleFields() {
+  const type = ui['rule-type'].value;
+  for (const node of ui['rule-form'].querySelectorAll('[data-fields]')) {
+    const applies = node.getAttribute('data-fields').split(/\s+/).includes(type);
+    node.hidden = !applies;
+  }
+  // A "since the day's open" percent rule has no time window to choose.
+  const basis = ui['rule-form'].querySelector('[name="basis"]');
+  const windowControl = ui['rule-window'].closest('.control');
+  if (type === 'percent' && basis?.value === 'dayOpen') windowControl.hidden = true;
+}
+
+/* --------------------------------------------------------------------- init */
+
+function restoreState() {
+  state.settings = loadSettings();
+  const { config, rejected } = configFromSearch(globalThis.location?.search ?? '');
+  state.config = config;
+  if (rejected.length > 0) {
+    console.warn('DataScope: נדחו כתובות ספק שאינן ברשימת ההיתר:', rejected);
+  }
+
+  const storedRules = readJson(KEYS.RULES, []);
+  if (Array.isArray(storedRules)) {
+    state.rules = storedRules
+      .filter((rule) => rule && rule.assetKey && rule.type)
+      // Re-armed on load: the condition may have changed while the tab was
+      // closed, and a rule that fires the instant the page opens is noise.
+      .map((rule) => createRule({ ...rule, armed: true }));
+  }
+
+  const storedHistory = readJson(KEYS.HISTORY, []);
+  if (Array.isArray(storedHistory)) state.history = AlertHistory.from(storedHistory, 200);
+
+  const storedWatch = readJson(KEYS.WATCHLIST, null);
+  const entries = Array.isArray(storedWatch) && storedWatch.length > 0 ? storedWatch : DEFAULT_WATCHLIST;
+  for (const entry of entries) {
+    const asset = buildAsset(entry);
+    state.market.watch(entry.name ? { ...asset, name: entry.name } : asset);
+  }
+
+  state.selectedKey =
+    state.settings.selectedKey && state.market.registry.has(state.settings.selectedKey)
+      ? state.settings.selectedKey
+      : (state.market.watchOrder[0] ?? null);
+
+  if (state.settings.finnhubToken) ui['finnhub-token'].value = state.settings.finnhubToken;
+  ui['toggle-sound'].textContent = state.settings.soundEnabled ? '🔔 צליל פעיל' : '🔕 צליל כבוי';
+  ui['toggle-sound'].setAttribute('aria-pressed', state.settings.soundEnabled ? 'true' : 'false');
 }
 
 function init() {
   cacheElements();
+  restoreState();
+
+  notifier = new Notifier({
+    soundEnabled: state.settings.soundEnabled,
+    onFallback: showToast,
+  });
+
   wireEvents();
-  render();
+  syncRuleFields();
+  updateNotificationState();
+
+  connectCrypto();
+  connectStocks();
+  startMoversPoll();
+  loadUniverse();
+
+  setInterval(alertTick, ALERT_TICK_MS);
+  // Keeps the "updated N ago" labels and the staleness pills honest while the
+  // feed is quiet.
+  setInterval(requestRender, 5_000);
+
+  requestRender();
 }
 
 if (typeof document !== 'undefined') {

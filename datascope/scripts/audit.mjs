@@ -1,42 +1,61 @@
 /**
- * Source audit: the privacy and security promises the README makes, checked
- * mechanically instead of by reading the diff.
+ * Source audit: the properties the README promises, checked mechanically.
  *
- * It fails the build (and one of the tests) when a source file:
- *   - references an external origin from HTML, CSS or an import,
- *   - reaches the network at runtime (fetch / XHR / beacon / WebSocket),
- *   - persists imported data (localStorage / sessionStorage / IndexedDB / cookies),
- *   - assigns HTML from a string (innerHTML and friends), which is how imported
- *     CSV text would turn into markup,
- *   - or evaluates code from a string.
+ * This app talks to the network - that is its whole purpose - so the audit is
+ * not "no requests" any more. It is "only these hosts, and nothing else":
  *
- * Comments and string literals are handled separately: identifiers are searched
- * in code with comments stripped, so a docblock may discuss `localStorage`
- * without tripping the check, while `'http://www.w3.org/2000/svg'` inside a
- * string stays intact for the URL check.
+ *   - every absolute URL in shipped code points at a market data provider on
+ *     the allowlist, or at the app's own origin,
+ *   - no analytics or error-reporting service is contacted,
+ *   - no HTML is assigned from a string (imported names and symbols come from
+ *     third parties and must never become markup),
+ *   - no code is evaluated from a string,
+ *   - the page loads no external script, stylesheet or font.
+ *
+ * Comments and string literals are treated separately: identifiers are matched
+ * against code with comments stripped, so a docblock may discuss `innerHTML`
+ * without tripping the check, while `'https://api.binance.com'` inside a string
+ * is still seen by the URL check.
  */
 
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
-/** Namespace and spec URLs that are identifiers, not network requests. */
-const ALLOWED_URL_PREFIXES = ['http://www.w3.org/'];
+/** Hosts the app is allowed to contact at runtime. */
+export const ALLOWED_HOSTS = Object.freeze([
+  'api.binance.com',
+  'stream.binance.com',
+  'data-stream.binance.vision',
+  'api.binance.us',
+  'stream.binance.us',
+  'api.coingecko.com',
+  'finnhub.io',
+  'ws.finnhub.io',
+  'query1.finance.yahoo.com',
+  'localhost',
+  '127.0.0.1',
+]);
+
+/** URLs that are identifiers or documentation, not network destinations. */
+const URL_EXEMPT_PREFIXES = ['http://www.w3.org/', 'https://finnhub.io/docs', 'data:', 'blob:'];
 
 const FORBIDDEN_IDENTIFIERS = [
-  { pattern: /\bfetch\s*\(/, label: 'fetch(' },
-  { pattern: /\bXMLHttpRequest\b/, label: 'XMLHttpRequest' },
-  { pattern: /\bWebSocket\b/, label: 'WebSocket' },
-  { pattern: /\bEventSource\b/, label: 'EventSource' },
-  { pattern: /sendBeacon\s*\(/, label: 'navigator.sendBeacon(' },
-  { pattern: /\blocalStorage\b/, label: 'localStorage' },
-  { pattern: /\bsessionStorage\b/, label: 'sessionStorage' },
-  { pattern: /\bindexedDB\b/i, label: 'indexedDB' },
-  { pattern: /document\s*\.\s*cookie/, label: 'document.cookie' },
   { pattern: /\.innerHTML\b/, label: '.innerHTML' },
   { pattern: /\.outerHTML\b/, label: '.outerHTML' },
   { pattern: /insertAdjacentHTML\b/, label: 'insertAdjacentHTML' },
+  { pattern: /document\s*\.\s*write\b/, label: 'document.write' },
   { pattern: /\beval\s*\(/, label: 'eval(' },
   { pattern: /new\s+Function\s*\(/, label: 'new Function(' },
+  { pattern: /sendBeacon\s*\(/, label: 'navigator.sendBeacon(' },
+  { pattern: /\bgtag\b|googletagmanager|\bmixpanel\b|\bsentry\b|\bhotjar\b/i, label: 'analytics or error reporting' },
+];
+
+/** The CSV *reader* is gone; this makes its return a build failure. */
+const FORBIDDEN_IMPORTS = [
+  { pattern: /from\s+['"][^'"]*\/csv\.js['"]/, label: 'CSV import module' },
+  { pattern: /\bparseCsv\s*\(/, label: 'parseCsv(' },
+  { pattern: /\bFileReader\b/, label: 'FileReader' },
+  { pattern: /type\s*=\s*['"]file['"]/, label: 'file input' },
 ];
 
 /**
@@ -44,7 +63,6 @@ const FORBIDDEN_IDENTIFIERS = [
  * Good enough for this codebase (no regex literal here contains a comment
  * opener); it is a lint helper, not a JavaScript parser.
  * @param {string} source
- * @returns {string}
  */
 export function stripComments(source) {
   let out = '';
@@ -86,25 +104,36 @@ export function stripComments(source) {
   return out;
 }
 
-function isExternal(url) {
+/**
+ * @param {string} url
+ * @param {string[]} allowedHosts
+ * @returns {boolean} True when the destination is not permitted.
+ */
+export function isDisallowedUrl(url, allowedHosts = ALLOWED_HOSTS) {
   const value = url.trim();
   if (value === '') return false;
+  if (URL_EXEMPT_PREFIXES.some((prefix) => value.startsWith(prefix))) return false;
   if (value.startsWith('//')) return true;
-  if (/^[a-z][a-z0-9+.-]*:/i.test(value)) {
-    if (value.startsWith('data:')) return false;
-    if (value.startsWith('blob:')) return false;
-    if (ALLOWED_URL_PREFIXES.some((prefix) => value.startsWith(prefix))) return false;
+  if (!/^[a-z][a-z0-9+.-]*:/i.test(value)) return false; // relative: same origin
+
+  let parsed;
+  try {
+    parsed = new URL(value);
+  } catch {
     return true;
   }
-  return false;
+  if (!['https:', 'wss:', 'http:', 'ws:'].includes(parsed.protocol)) return true;
+  return !allowedHosts.includes(parsed.hostname);
 }
 
 /**
- * @param {string} root Project root.
+ * @param {string} root
  * @param {string[]} files Paths relative to root.
+ * @param {{allowedHosts?: string[]}} [options]
  * @returns {Promise<string[]>} Findings, empty when everything passes.
  */
-export async function auditSources(root, files) {
+export async function auditSources(root, files, options = {}) {
+  const allowedHosts = options.allowedHosts ?? ALLOWED_HOSTS;
   /** @type {string[]} */
   const findings = [];
 
@@ -113,36 +142,48 @@ export async function auditSources(root, files) {
     const extension = path.extname(relative);
 
     if (extension === '.html') {
-      for (const match of source.matchAll(/\b(?:src|href)\s*=\s*"([^"]*)"/g)) {
-        if (isExternal(match[1])) {
+      const markup = source.replace(/<!--[\s\S]*?-->/g, ' ');
+      for (const match of markup.matchAll(/\b(?:src|href)\s*=\s*"([^"]*)"/g)) {
+        if (isDisallowedUrl(match[1], allowedHosts)) {
           findings.push(`${relative}: external reference ${match[1]}`);
         }
       }
-      for (const match of source.matchAll(/<script\b[^>]*>/g)) {
+      // The page itself must stay self-contained even though the app calls APIs.
+      for (const match of markup.matchAll(/<(script|link)\b[^>]*>/g)) {
         if (/\bintegrity=|\bcrossorigin=/.test(match[0])) {
-          findings.push(`${relative}: script tag looks remote: ${match[0]}`);
+          findings.push(`${relative}: remote asset tag: ${match[0].slice(0, 80)}`);
         }
+      }
+      for (const { pattern, label } of FORBIDDEN_IMPORTS) {
+        if (pattern.test(markup)) findings.push(`${relative}: contains ${label}`);
       }
       continue;
     }
 
     if (extension === '.css') {
-      // Comments are stripped first: a comment may name @import while explaining
-      // that the stylesheet does not use one.
       const css = source.replace(/\/\*[\s\S]*?\*\//g, ' ');
       for (const match of css.matchAll(/url\(\s*['"]?([^'")]+)['"]?\s*\)/g)) {
-        if (isExternal(match[1])) findings.push(`${relative}: external url() ${match[1]}`);
+        if (isDisallowedUrl(match[1], allowedHosts)) {
+          findings.push(`${relative}: external url() ${match[1]}`);
+        }
       }
       if (/@import/.test(css)) findings.push(`${relative}: @import is not allowed`);
       continue;
     }
 
     const code = stripComments(source);
+
     for (const { pattern, label } of FORBIDDEN_IDENTIFIERS) {
       if (pattern.test(code)) findings.push(`${relative}: uses ${label}`);
     }
-    for (const match of code.matchAll(/(?:^|[^\w])(?:import|from)\s*\(?\s*['"]([^'"]+)['"]/g)) {
-      if (isExternal(match[1])) findings.push(`${relative}: imports external module ${match[1]}`);
+    for (const { pattern, label } of FORBIDDEN_IMPORTS) {
+      if (pattern.test(code)) findings.push(`${relative}: contains ${label}`);
+    }
+    // Every absolute URL that survives comment stripping is a real destination.
+    for (const match of code.matchAll(/['"`](([a-z][a-z0-9+.-]*:)?\/\/[^'"`\s]+)['"`]/gi)) {
+      if (isDisallowedUrl(match[1], allowedHosts)) {
+        findings.push(`${relative}: contacts non-allowlisted host ${match[1]}`);
+      }
     }
   }
 
@@ -154,16 +195,24 @@ export const SHIPPED_FILES = Object.freeze([
   'index.html',
   'src/styles.css',
   'src/main.js',
-  'src/lib/csv.js',
-  'src/lib/validate.js',
-  'src/lib/stats.js',
-  'src/lib/selection.js',
+  'src/lib/model.js',
   'src/lib/format.js',
-  'src/lib/summary.js',
+  'src/lib/series.js',
+  'src/lib/alerts.js',
+  'src/lib/assets.js',
+  'src/lib/market.js',
+  'src/lib/config.js',
+  'src/lib/storage.js',
   'src/lib/exporters.js',
-  'src/lib/demo.js',
+  'src/providers/binance.js',
+  'src/providers/finnhub.js',
+  'src/providers/yahoo.js',
+  'src/providers/coingecko.js',
+  'src/providers/connection.js',
   'src/ui/dom.js',
   'src/ui/charts.js',
-  'src/ui/table.js',
-  'src/ui/panels.js',
+  'src/ui/dashboard.js',
+  'src/ui/ticker.js',
+  'src/ui/alerts-ui.js',
+  'src/ui/notifications.js',
 ]);

@@ -1,38 +1,59 @@
 /**
- * Display formatting. This is the only place rounding is allowed to happen.
+ * Display formatting. The only place in the app that rounds.
  *
- * Dates are formatted from their YYYY-MM-DD text through UTC, so a date-only
- * record never shifts a day because of the viewer's timezone.
+ * Prices span eleven orders of magnitude here - BTC near 100,000 and meme coins
+ * near 0.000008 - so a fixed two decimals is wrong in both directions: it hides
+ * every digit that matters on the small one and adds noise to the large one.
+ * `formatPrice` picks its precision from the magnitude instead.
  *
- * Numbers and dates are rendered LTR inside the RTL page. The direction is set
- * by the DOM helpers (`num()` in ui/dom.js), not by embedding bidi control
- * characters in the strings - control characters would leak into exports.
+ * Numbers and times are rendered LTR inside the RTL page by the `.num` helper in
+ * ui/dom.js, using an isolating element rather than bidi control characters, so
+ * nothing invisible can leak into an export.
  */
 
 const HE = 'he-IL';
 
 /**
- * @param {number|null} value
+ * @param {number|null|undefined} value
  * @param {number} [minimumFractionDigits]
  * @param {number} [maximumFractionDigits]
  */
 export function formatNumber(value, minimumFractionDigits = 0, maximumFractionDigits = 2) {
   if (value === null || value === undefined || !Number.isFinite(value)) return '—';
-  return new Intl.NumberFormat(HE, {
-    minimumFractionDigits,
-    maximumFractionDigits,
-  }).format(value);
+  return new Intl.NumberFormat(HE, { minimumFractionDigits, maximumFractionDigits }).format(value);
 }
 
 /**
- * Prices carry no currency: the file does not say what currency a symbol trades
- * in, and different symbols in one file may differ. Only digits are shown.
+ * Decimal places appropriate to a price's magnitude.
+ * @param {number} value
+ */
+export function priceDigits(value) {
+  const abs = Math.abs(value);
+  if (abs === 0) return 2;
+  if (abs >= 1000) return 2;
+  if (abs >= 1) return 2;
+  if (abs >= 0.01) return 4;
+  if (abs >= 0.0001) return 6;
+  return 8;
+}
+
+/**
+ * A price, with no currency symbol attached: the quote currency is shown beside
+ * the value in the UI, because the same number means different things on
+ * BTC/USDT and on a euro-denominated listing.
  * @param {number|null} value
  */
 export function formatPrice(value) {
   if (value === null || value === undefined || !Number.isFinite(value)) return '—';
-  const digits = Math.abs(value) > 0 && Math.abs(value) < 1 ? 4 : 2;
+  const digits = priceDigits(value);
   return formatNumber(value, digits, digits);
+}
+
+/** A signed price move, e.g. "+1.24". */
+export function formatPriceDelta(value) {
+  if (value === null || value === undefined || !Number.isFinite(value)) return '—';
+  const sign = value > 0 ? '+' : value < 0 ? '−' : '';
+  return `${sign}${formatPrice(Math.abs(value))}`;
 }
 
 /** @param {number|null} value */
@@ -40,14 +61,9 @@ export function formatInteger(value) {
   return formatNumber(value, 0, 0);
 }
 
-/** @param {number|null} value Average volume - kept to two decimals. */
-export function formatVolume(value) {
-  return formatNumber(value, 0, 2);
-}
-
 /**
- * Signed percentage, two decimals. The sign is explicit so a small negative
- * change cannot be mistaken for a small positive one.
+ * Signed percentage, two decimals. The sign is explicit so a small fall cannot
+ * be misread as a small rise at a glance.
  * @param {number|null} value
  */
 export function formatPercent(value) {
@@ -61,14 +77,14 @@ export function formatPercent(value) {
 }
 
 /**
- * Compact axis labels: 1.2K / 3.4M / 5.6B. Used only for chart ticks, where full
- * digits would collide; the table and the exports keep the exact values.
- * @param {number} value
+ * Compact magnitudes for axis ticks and volume: 1.2K / 3.4M / 5.6B.
+ * @param {number|null} value
  */
 export function formatCompact(value) {
-  if (!Number.isFinite(value)) return '—';
+  if (value === null || value === undefined || !Number.isFinite(value)) return '—';
   const abs = Math.abs(value);
   const units = [
+    [1e12, 'T'],
     [1e9, 'B'],
     [1e6, 'M'],
     [1e3, 'K'],
@@ -76,70 +92,90 @@ export function formatCompact(value) {
   for (const [scale, suffix] of units) {
     if (abs >= scale) {
       const scaled = value / scale;
-      const digits = Math.abs(scaled) < 10 ? 1 : 0;
-      return `${formatNumber(scaled, 0, digits)}${suffix}`;
+      return `${formatNumber(scaled, 0, Math.abs(scaled) < 10 ? 2 : 1)}${suffix}`;
     }
   }
-  return formatNumber(value, 0, abs < 10 ? 2 : 0);
+  return formatNumber(value, 0, abs < 1 ? 4 : abs < 100 ? 2 : 0);
 }
 
 /**
- * @param {string|null} iso YYYY-MM-DD
- * @returns {string} dd.MM.yyyy, or the raw text if it is not a date we parsed.
+ * Wall-clock time in the viewer's own timezone, which is the only timezone that
+ * answers "how long ago was this".
+ * @param {number|null} ts Epoch ms.
+ * @param {{seconds?: boolean}} [options]
  */
-export function formatDate(iso) {
-  if (!iso || typeof iso !== 'string' || iso.length < 10) return '—';
-  const year = iso.slice(0, 4);
-  const month = iso.slice(5, 7);
-  const day = iso.slice(8, 10);
-  return `${day}.${month}.${year}`;
-}
-
-/** Short axis form: dd.MM (the year lives in the axis title). */
-export function formatDateShort(iso) {
-  if (!iso || typeof iso !== 'string' || iso.length < 10) return '';
-  return `${iso.slice(8, 10)}.${iso.slice(5, 7)}`;
-}
-
-/** Month + year, for a sparse time axis: MM.yyyy */
-export function formatMonth(iso) {
-  if (!iso || typeof iso !== 'string' || iso.length < 10) return '';
-  return `${iso.slice(5, 7)}.${iso.slice(0, 4)}`;
+export function formatClock(ts, options = {}) {
+  if (ts === null || ts === undefined || !Number.isFinite(ts)) return '—';
+  return new Intl.DateTimeFormat(HE, {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: options.seconds === false ? undefined : '2-digit',
+    hour12: false,
+  }).format(new Date(ts));
 }
 
 /**
- * Days between two ISO dates, computed in UTC.
- * @param {string} fromIso
- * @param {string} toIso
+ * @param {number|null} ts Epoch ms.
  */
-export function daysBetween(fromIso, toIso) {
-  return Math.round((isoToUtcMillis(toIso) - isoToUtcMillis(fromIso)) / 86_400_000);
+export function formatDateTime(ts) {
+  if (ts === null || ts === undefined || !Number.isFinite(ts)) return '—';
+  return new Intl.DateTimeFormat(HE, {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).format(new Date(ts));
+}
+
+/** @param {number|null} ts Epoch ms. */
+export function formatDate(ts) {
+  if (ts === null || ts === undefined || !Number.isFinite(ts)) return '—';
+  return new Intl.DateTimeFormat(HE, {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  }).format(new Date(ts));
 }
 
 /**
- * @param {string} iso YYYY-MM-DD
- * @returns {number} UTC milliseconds at midnight of that calendar day.
+ * Elapsed time in Hebrew: "עכשיו", "לפני 12 שניות", "לפני 4 דקות".
+ * Used for the freshness indicator, so it stays coarse on purpose - a counter
+ * ticking every second next to a price is noise, not information.
+ * @param {number|null} ms
  */
-export function isoToUtcMillis(iso) {
-  return Date.UTC(
-    Number(iso.slice(0, 4)),
-    Number(iso.slice(5, 7)) - 1,
-    Number(iso.slice(8, 10)),
-  );
+export function formatAge(ms) {
+  if (ms === null || ms === undefined || !Number.isFinite(ms)) return '—';
+  const seconds = Math.max(0, Math.round(ms / 1000));
+  if (seconds < 3) return 'עכשיו';
+  if (seconds < 60) return `לפני ${seconds} שניות`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `לפני ${minutes} דקות`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `לפני ${hours} שעות`;
+  const days = Math.round(hours / 24);
+  return `לפני ${days} ימים`;
 }
 
-/** Today's date as YYYY-MM-DD, in the viewer's own calendar day. */
+/**
+ * A duration as a label: "5 דקות", "2 שעות".
+ * @param {number} ms
+ */
+export function formatDuration(ms) {
+  if (!Number.isFinite(ms)) return '—';
+  const minutes = Math.round(ms / 60_000);
+  if (minutes < 1) return 'פחות מדקה';
+  if (minutes < 60) return `${minutes} דקות`;
+  const hours = Math.round((minutes / 60) * 10) / 10;
+  return `${hours} שעות`;
+}
+
+/** Today's date as YYYY-MM-DD in the viewer's own calendar day (export names). */
 export function todayIso(now = new Date()) {
   const year = String(now.getFullYear()).padStart(4, '0');
   const month = String(now.getMonth() + 1).padStart(2, '0');
   const day = String(now.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
-}
-
-/** @param {number} bytes */
-export function formatBytes(bytes) {
-  if (!Number.isFinite(bytes)) return '—';
-  if (bytes < 1024) return `${formatInteger(bytes)} בייט`;
-  if (bytes < 1024 * 1024) return `${formatNumber(bytes / 1024, 0, 1)} ק״ב`;
-  return `${formatNumber(bytes / (1024 * 1024), 0, 2)} מ״ב`;
 }

