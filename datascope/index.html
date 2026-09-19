@@ -3,6 +3,8 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#0b0f17" />
     <title>DataScope — מעקב שוק בזמן אמת</title>
     <meta
       name="description"
@@ -13,7 +15,7 @@
     <link rel="stylesheet" href="src/styles.css" />
     <link
       rel="icon"
-      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%232a78d6'/%3E%3Cpath d='M3 11.5 6 7l3 2.5L13 4' stroke='%23fff' stroke-width='1.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%236366f1'/%3E%3Cpath d='M7 22l6-7 4 4 8-10' stroke='%230b0f17' stroke-width='2.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"
     />
   </head>
   <body>
@@ -22,22 +24,30 @@
     <!-- ===================== סרגל נעים ===================== -->
     <div class="ticker-bar" aria-labelledby="ticker-heading">
       <h2 id="ticker-heading" class="visually-hidden">מובילי תנועה בשוק</h2>
-      <div class="ticker-label">מובילי תנועה</div>
+      <div class="ticker-label" data-icon="activity">מובילי תנועה</div>
       <div id="ticker" class="ticker-track"></div>
     </div>
 
-    <header class="page-header">
-      <div class="header-inner">
-        <div class="header-titles">
-          <h1>DataScope</h1>
-          <p class="tagline">מעקב שוק בזמן אמת — מניות אמריקאיות וקריפטו</p>
+    <!-- ===================== סרגל עליון ===================== -->
+    <header class="topbar">
+      <div class="topbar-inner">
+        <div class="brand">
+          <span id="brand-mark" class="brand-mark-slot"></span>
+          <span class="brand-text">
+            <h1>DataScope</h1>
+            <p class="tagline">מעקב שוק בזמן אמת — מניות אמריקאיות וקריפטו</p>
+          </span>
         </div>
 
-        <div class="header-side">
-          <div id="connection-pills" class="connection-pills" aria-label="מצב החיבור לספקי הנתונים"></div>
-          <div class="header-actions">
+        <div class="topbar-side">
+          <div
+            id="connection-pills"
+            class="connection-pills"
+            aria-label="מצב החיבור לספקי הנתונים"
+          ></div>
+          <div class="topbar-actions">
             <button id="enable-notifications" class="button button-primary" type="button">
-              הפעלת התראות בדפדפן
+              הפעלת התראות
             </button>
             <button
               id="toggle-sound"
@@ -46,269 +56,328 @@
               aria-pressed="true"
               title="צליל בעת התראה"
             >
-              🔔 צליל פעיל
+              צליל פעיל
             </button>
             <button
               id="toggle-settings"
               class="button button-quiet"
               type="button"
-              aria-expanded="false"
-              aria-controls="settings-panel"
+              aria-haspopup="dialog"
             >
               הגדרות
             </button>
           </div>
         </div>
       </div>
-
-      <!-- ===================== הגדרות ===================== -->
-      <div id="settings-panel" class="settings-panel" hidden>
-        <div class="settings-inner">
-          <div class="control">
-            <label for="finnhub-token">מפתח Finnhub (אופציונלי)</label>
-            <input
-              id="finnhub-token"
-              type="password"
-              dir="ltr"
-              autocomplete="off"
-              placeholder="להדבקת מפתח חינמי מ־finnhub.io"
-              aria-describedby="finnhub-help"
-            />
-            <p id="finnhub-help" class="control-note">
-              בלי מפתח, מחירי המניות נמשכים דרך שרת ה־proxy המקומי מ־Yahoo Finance בתדירות קבועה
-              וייתכן שבעיכוב. עם מפתח חינמי, המניות מגיעות בזרם WebSocket בזמן אמת. המפתח נשמר
-              בדפדפן שלך בלבד ונשלח רק אל finnhub.io.
-            </p>
-          </div>
-          <div class="settings-actions">
-            <button id="save-token" class="button" type="button">שמירה והתחברות מחדש</button>
-            <button id="clear-token" class="button button-quiet" type="button">מחיקת המפתח</button>
-            <button id="clear-storage" class="button button-quiet" type="button">
-              מחיקת כל הנתונים השמורים
-            </button>
-          </div>
-          <p id="settings-status" class="settings-status" role="status" aria-live="polite"></p>
-        </div>
-      </div>
     </header>
 
-    <main id="main">
-      <!-- ===================== חיפוש והוספה ===================== -->
-      <section class="panel" aria-labelledby="search-heading">
-        <h2 id="search-heading">חיפוש נכסים והוספה למעקב</h2>
-
-        <div class="search-row">
-          <div class="control search-control">
-            <label for="asset-search">חיפוש מניה או צמד קריפטו</label>
-            <input
-              id="asset-search"
-              type="search"
-              dir="ltr"
-              autocomplete="off"
-              role="combobox"
-              aria-expanded="false"
-              aria-controls="asset-results"
-              aria-autocomplete="list"
-              placeholder="AAPL, Apple, BTC, ETHUSDT…"
-            />
-            <p id="search-hint" class="control-note">
-              יש להקליד סמל או שם. התוצאות מגיעות מרשימת המכשירים של הספקים המחוברים.
-            </p>
-            <ul id="asset-results" class="asset-results" role="listbox" aria-label="תוצאות חיפוש" hidden></ul>
-          </div>
-
-          <div class="control">
-            <label for="class-filter">סוג נכס</label>
-            <select id="class-filter">
-              <option value="all">הכול</option>
-              <option value="stock">מניות אמריקאיות</option>
-              <option value="crypto">קריפטו</option>
-            </select>
-          </div>
-        </div>
-      </section>
-
-      <!-- ===================== רשימת מעקב ===================== -->
-      <section class="panel" aria-labelledby="watchlist-heading">
-        <h2 id="watchlist-heading">רשימת מעקב</h2>
-        <div id="watch-cards" class="watch-cards"></div>
-      </section>
-
-      <!-- ===================== נכס נבחר ===================== -->
-      <section class="panel" aria-labelledby="detail-heading">
-        <div class="detail-head">
-          <h2 id="detail-heading">
-            <span id="detail-name" class="detail-name">—</span>
-            <span id="detail-symbol" class="detail-symbol" dir="ltr"></span>
-          </h2>
-          <p id="detail-source" class="detail-source"></p>
-        </div>
-
-        <div id="intraday-stats" class="stats-grid"></div>
-
-        <figure class="chart-figure">
-          <figcaption id="price-chart-caption">מחיר חי</figcaption>
-          <div id="price-chart-wrap" class="chart-wrap" dir="ltr">
-            <div id="price-chart" class="chart-canvas"></div>
-            <div id="price-tooltip" class="chart-tooltip" role="presentation" hidden></div>
-          </div>
-        </figure>
-
-        <figure class="chart-figure">
-          <figcaption id="volume-chart-caption">מחזור</figcaption>
-          <div id="volume-chart-wrap" class="chart-wrap" dir="ltr">
-            <div id="volume-chart" class="chart-canvas"></div>
-            <div id="volume-tooltip" class="chart-tooltip" role="presentation" hidden></div>
-          </div>
-        </figure>
-
-        <p class="chart-hint">
-          אפשר להזיז את הסמן עם העכבר, או להתמקד בגרף במקלדת (Tab) ולנוע עם חצים ימינה ושמאלה,
-          Home ו־End. הערך שנקרא מופיע כאן:
-        </p>
-        <p id="chart-readout" class="chart-readout" role="status" aria-live="polite"></p>
-        <p id="chart-empty" class="empty-note" hidden>
-          ממתין לנתונים חיים עבור הנכס. הגרף ייבנה מהנרות שמתקבלים מהספק.
-        </p>
-      </section>
-
-      <!-- ===================== התראות ===================== -->
-      <section class="panel" aria-labelledby="alerts-heading">
-        <h2 id="alerts-heading">מנוע התראות</h2>
-        <p id="notification-state" class="notification-state" role="status" aria-live="polite"></p>
-
-        <form id="rule-form" class="rule-form" novalidate>
-          <div class="controls-grid">
-            <div class="control">
-              <label for="rule-asset">נכס</label>
-              <select id="rule-asset" name="assetKey" dir="ltr"></select>
-              <p class="field-error" data-error-for="assetKey" hidden></p>
+    <main id="main" class="dashboard">
+      <div class="dashboard-grid">
+        <!-- ===================== רשימת מעקב ===================== -->
+        <aside class="watch-rail" aria-labelledby="watchlist-heading">
+          <div class="card">
+            <div class="card-head">
+              <h2 id="watchlist-heading" class="card-title" data-icon="list">רשימת מעקב</h2>
+              <span id="watch-count" class="badge badge-muted"></span>
             </div>
 
-            <div class="control">
-              <label for="rule-type">סוג התראה</label>
-              <select id="rule-type" name="type">
-                <option value="price">מחיר יעד</option>
-                <option value="percent">זינוק באחוזים</option>
-                <option value="volume">זינוק במחזור</option>
-              </select>
-            </div>
-
-            <!-- שדות לפי סוג ההתראה -->
-            <div class="control" data-fields="price">
-              <label for="rule-direction">כיוון</label>
-              <select id="rule-direction" name="direction">
-                <option value="above">מעל או שווה ל…</option>
-                <option value="below">מתחת או שווה ל…</option>
-              </select>
-            </div>
-            <div class="control" data-fields="price">
-              <label for="rule-target">מחיר יעד</label>
-              <input id="rule-target" name="target" type="number" step="any" min="0" dir="ltr" />
-              <p class="field-error" data-error-for="target" hidden></p>
-            </div>
-
-            <div class="control" data-fields="percent" hidden>
-              <label for="rule-move">כיוון התנועה</label>
-              <select id="rule-move" name="move">
-                <option value="both">עלייה או ירידה</option>
-                <option value="up">עלייה בלבד</option>
-                <option value="down">ירידה בלבד</option>
-              </select>
-            </div>
-            <div class="control" data-fields="percent" hidden>
-              <label for="rule-threshold">אחוז שינוי</label>
-              <input
-                id="rule-threshold"
-                name="thresholdPct"
-                type="number"
-                step="any"
-                min="0"
-                dir="ltr"
-                value="2"
-              />
-              <p class="field-error" data-error-for="thresholdPct" hidden></p>
-            </div>
-            <div class="control" data-fields="percent" hidden>
-              <label for="rule-basis">בסיס ההשוואה</label>
-              <select id="rule-basis" name="basis">
-                <option value="window">חלון זמן נע</option>
-                <option value="dayOpen">מאז פתיחת היום</option>
-              </select>
-            </div>
-
-            <div class="control" data-fields="volume" hidden>
-              <label for="rule-multiple">כפולה מהממוצע</label>
-              <input
-                id="rule-multiple"
-                name="multiple"
-                type="number"
-                step="any"
-                min="1"
-                dir="ltr"
-                value="3"
-              />
-              <p class="field-error" data-error-for="multiple" hidden></p>
-            </div>
-
-            <div class="control" data-fields="percent volume">
-              <label for="rule-window">חלון זמן</label>
-              <select id="rule-window" name="windowMs">
-                <option value="60000">דקה</option>
-                <option value="300000" selected>5 דקות</option>
-                <option value="900000">15 דקות</option>
-                <option value="3600000">שעה</option>
-              </select>
-              <p class="field-error" data-error-for="windowMs" hidden></p>
-            </div>
-
-            <div class="control">
-              <label for="rule-cooldown">זמן צינון בין התראות</label>
-              <select id="rule-cooldown" name="cooldownMs">
-                <option value="60000">דקה</option>
-                <option value="300000" selected>5 דקות</option>
-                <option value="900000">15 דקות</option>
-                <option value="3600000">שעה</option>
-              </select>
-            </div>
-
-            <div class="control">
-              <label for="rule-note">הערה (אופציונלי)</label>
-              <input id="rule-note" name="note" type="text" maxlength="120" />
-            </div>
-          </div>
-
-          <div class="form-actions">
-            <button id="add-rule" class="button button-primary" type="submit">הוספת התראה</button>
-            <span id="rule-form-status" class="form-status" role="status" aria-live="polite"></span>
-          </div>
-        </form>
-
-        <div class="alerts-columns">
-          <div class="alerts-column">
-            <h3 id="rules-heading">התראות פעילות</h3>
-            <div id="rule-list" aria-labelledby="rules-heading"></div>
-          </div>
-
-          <div class="alerts-column">
-            <div class="history-head-row">
-              <h3 id="history-heading">היסטוריית התראות</h3>
-              <div class="history-actions">
-                <button id="export-history" class="button button-quiet button-small" type="button">
-                  ייצוא ל־CSV
-                </button>
-                <button id="clear-history" class="button button-quiet button-small" type="button">
-                  ניקוי
-                </button>
+            <div class="search-block">
+              <div class="control">
+                <label for="asset-search">חיפוש נכס</label>
+                <input
+                  id="asset-search"
+                  type="search"
+                  dir="ltr"
+                  autocomplete="off"
+                  role="combobox"
+                  aria-expanded="false"
+                  aria-controls="asset-results"
+                  aria-autocomplete="list"
+                  placeholder="AAPL, Apple, BTC, ETHUSDT…"
+                />
+                <ul
+                  id="asset-results"
+                  class="asset-results"
+                  role="listbox"
+                  aria-label="תוצאות חיפוש"
+                  hidden
+                ></ul>
+              </div>
+              <div class="control">
+                <label for="class-filter">סוג נכס</label>
+                <select id="class-filter">
+                  <option value="all">הכול</option>
+                  <option value="stock">מניות אמריקאיות</option>
+                  <option value="crypto">קריפטו</option>
+                </select>
               </div>
             </div>
-            <div id="history-list" aria-labelledby="history-heading"></div>
+
+            <div id="watch-cards" class="watch-list"></div>
           </div>
-        </div>
-      </section>
+        </aside>
+
+        <!-- ===================== נכס נבחר ===================== -->
+        <section class="chart-column" aria-labelledby="detail-heading">
+          <div class="card">
+            <h2 id="detail-heading" class="visually-hidden">פרטי הנכס הנבחר</h2>
+
+            <div class="asset-hero">
+              <div class="hero-identity">
+                <div class="hero-name-row">
+                  <span id="detail-name" class="detail-name">—</span>
+                  <span id="detail-symbol" class="detail-symbol" dir="ltr"></span>
+                  <span id="detail-class" class="asset-chip"></span>
+                </div>
+                <p id="detail-source" class="detail-source"></p>
+              </div>
+
+              <div class="hero-price-block">
+                <div id="hero-price" class="hero-price"></div>
+                <div id="hero-change" class="hero-change"></div>
+              </div>
+            </div>
+
+            <div id="intraday-stats" class="stats-grid"></div>
+
+            <div class="chart-toolbar">
+              <div class="tabs" role="tablist" aria-label="סוג הגרף">
+                <button
+                  id="tab-candles"
+                  class="tab"
+                  type="button"
+                  role="tab"
+                  aria-selected="true"
+                  data-chart-mode="candles"
+                >
+                  נרות
+                </button>
+                <button
+                  id="tab-line"
+                  class="tab"
+                  type="button"
+                  role="tab"
+                  aria-selected="false"
+                  data-chart-mode="line"
+                >
+                  קו
+                </button>
+              </div>
+              <p id="chart-range-note" class="section-note"></p>
+            </div>
+
+            <figure class="chart-figure">
+              <figcaption id="price-chart-caption" data-icon="activity">מחיר חי</figcaption>
+              <div id="price-chart-wrap" class="chart-wrap" dir="ltr">
+                <div id="price-chart" class="chart-canvas"></div>
+                <div id="price-tooltip" class="chart-tooltip" role="presentation" hidden></div>
+              </div>
+            </figure>
+
+            <figure class="chart-figure">
+              <figcaption id="volume-chart-caption" data-icon="bar-chart">מחזור</figcaption>
+              <div id="volume-chart-wrap" class="chart-wrap" dir="ltr">
+                <div id="volume-chart" class="chart-canvas"></div>
+                <div id="volume-tooltip" class="chart-tooltip" role="presentation" hidden></div>
+              </div>
+            </figure>
+
+            <p class="chart-hint">
+              הצבעה עם העכבר, או Tab לגרף וניווט בחצים ימינה ושמאלה, Home ו־End.
+            </p>
+            <p id="chart-readout" class="chart-readout" role="status" aria-live="polite"></p>
+            <p id="chart-empty" class="empty-note" hidden>ממתין לנתונים חיים עבור הנכס…</p>
+          </div>
+        </section>
+
+        <!-- ===================== התראות ===================== -->
+        <section class="alerts-section" aria-labelledby="alerts-heading">
+          <div class="card">
+            <div class="card-head">
+              <h2 id="alerts-heading" class="card-title" data-icon="bell">מנוע התראות</h2>
+            </div>
+
+            <div class="card-body">
+              <p id="notification-state" class="notification-state" role="status" aria-live="polite"></p>
+
+              <form id="rule-form" class="rule-form" novalidate>
+                <div class="controls-grid">
+                  <div class="control">
+                    <label for="rule-asset">נכס</label>
+                    <select id="rule-asset" name="assetKey" dir="ltr"></select>
+                    <p class="field-error" data-error-for="assetKey" hidden></p>
+                  </div>
+
+                  <div class="control">
+                    <label for="rule-type">סוג התראה</label>
+                    <select id="rule-type" name="type">
+                      <option value="price">מחיר יעד</option>
+                      <option value="percent">זינוק באחוזים</option>
+                      <option value="volume">זינוק במחזור</option>
+                    </select>
+                  </div>
+
+                  <div class="control" data-fields="price">
+                    <label for="rule-direction">כיוון</label>
+                    <select id="rule-direction" name="direction">
+                      <option value="above">מעל או שווה ל…</option>
+                      <option value="below">מתחת או שווה ל…</option>
+                    </select>
+                  </div>
+                  <div class="control" data-fields="price">
+                    <label for="rule-target">מחיר יעד</label>
+                    <input id="rule-target" name="target" type="number" step="any" min="0" dir="ltr" />
+                    <p class="field-error" data-error-for="target" hidden></p>
+                  </div>
+
+                  <div class="control" data-fields="percent" hidden>
+                    <label for="rule-move">כיוון התנועה</label>
+                    <select id="rule-move" name="move">
+                      <option value="both">עלייה או ירידה</option>
+                      <option value="up">עלייה בלבד</option>
+                      <option value="down">ירידה בלבד</option>
+                    </select>
+                  </div>
+                  <div class="control" data-fields="percent" hidden>
+                    <label for="rule-threshold">אחוז שינוי</label>
+                    <input
+                      id="rule-threshold"
+                      name="thresholdPct"
+                      type="number"
+                      step="any"
+                      min="0"
+                      dir="ltr"
+                      value="2"
+                    />
+                    <p class="field-error" data-error-for="thresholdPct" hidden></p>
+                  </div>
+                  <div class="control" data-fields="percent" hidden>
+                    <label for="rule-basis">בסיס ההשוואה</label>
+                    <select id="rule-basis" name="basis">
+                      <option value="window">חלון זמן נע</option>
+                      <option value="dayOpen">מאז פתיחת היום</option>
+                    </select>
+                  </div>
+
+                  <div class="control" data-fields="volume" hidden>
+                    <label for="rule-multiple">כפולה מהממוצע</label>
+                    <input
+                      id="rule-multiple"
+                      name="multiple"
+                      type="number"
+                      step="any"
+                      min="1"
+                      dir="ltr"
+                      value="3"
+                    />
+                    <p class="field-error" data-error-for="multiple" hidden></p>
+                  </div>
+
+                  <div class="control" data-fields="percent volume">
+                    <label for="rule-window">חלון זמן</label>
+                    <select id="rule-window" name="windowMs">
+                      <option value="60000">דקה</option>
+                      <option value="300000" selected>5 דקות</option>
+                      <option value="900000">15 דקות</option>
+                      <option value="3600000">שעה</option>
+                    </select>
+                    <p class="field-error" data-error-for="windowMs" hidden></p>
+                  </div>
+
+                  <div class="control">
+                    <label for="rule-cooldown">זמן צינון</label>
+                    <select id="rule-cooldown" name="cooldownMs">
+                      <option value="60000">דקה</option>
+                      <option value="300000" selected>5 דקות</option>
+                      <option value="900000">15 דקות</option>
+                      <option value="3600000">שעה</option>
+                    </select>
+                  </div>
+
+                  <div class="control">
+                    <label for="rule-note">הערה (אופציונלי)</label>
+                    <input id="rule-note" name="note" type="text" maxlength="120" />
+                  </div>
+                </div>
+
+                <div class="form-actions">
+                  <button id="add-rule" class="button button-primary" type="submit">
+                    הוספת התראה
+                  </button>
+                  <span id="rule-form-status" class="form-status" role="status" aria-live="polite"></span>
+                </div>
+              </form>
+
+              <div class="alerts-columns">
+                <div class="alerts-column">
+                  <div class="history-head-row">
+                    <h3 id="rules-heading" class="card-title" data-icon="target">התראות פעילות</h3>
+                    <span id="rules-count" class="badge badge-muted"></span>
+                  </div>
+                  <div id="rule-list" aria-labelledby="rules-heading"></div>
+                </div>
+
+                <div class="alerts-column">
+                  <div class="history-head-row">
+                    <h3 id="history-heading" class="card-title" data-icon="history">
+                      היסטוריית התראות
+                    </h3>
+                    <div class="history-actions">
+                      <span id="history-count" class="badge badge-muted"></span>
+                      <button id="export-history" class="button button-quiet button-small" type="button">
+                        CSV
+                      </button>
+                      <button id="clear-history" class="button button-quiet button-small" type="button">
+                        ניקוי
+                      </button>
+                    </div>
+                  </div>
+                  <div id="history-list" aria-labelledby="history-heading"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
     </main>
 
-    <!-- הודעות קופצות בתוך הדף, לגיבוי כשהתראות הדפדפן חסומות -->
+    <!-- ===================== הגדרות ===================== -->
+    <dialog id="settings-panel" class="dialog" aria-labelledby="settings-title">
+      <form method="dialog" class="dialog-head">
+        <h2 id="settings-title" class="card-title" data-icon="sliders">הגדרות</h2>
+        <button id="close-settings" class="icon-button" type="submit" aria-label="סגירה">✕</button>
+      </form>
+      <div class="dialog-body">
+        <div class="control">
+          <label for="finnhub-token">מפתח Finnhub (אופציונלי)</label>
+          <input
+            id="finnhub-token"
+            type="password"
+            dir="ltr"
+            autocomplete="off"
+            placeholder="להדבקת מפתח חינמי מ־finnhub.io"
+            aria-describedby="finnhub-help"
+          />
+          <p id="finnhub-help" class="control-note">
+            בלי מפתח, מחירי המניות נמשכים דרך שרת ה־proxy המקומי מ־Yahoo Finance בתדירות קבועה
+            וייתכן שבעיכוב. עם מפתח חינמי, המניות מגיעות בזרם WebSocket בזמן אמת. המפתח נשמר
+            בדפדפן שלך בלבד ונשלח רק אל finnhub.io.
+          </p>
+        </div>
+        <div class="dialog-actions">
+          <button id="save-token" class="button button-primary" type="button">
+            שמירה והתחברות מחדש
+          </button>
+          <button id="clear-token" class="button button-quiet" type="button">מחיקת המפתח</button>
+          <button id="clear-storage" class="button button-quiet" type="button">
+            מחיקת כל הנתונים השמורים
+          </button>
+        </div>
+        <p id="settings-status" class="settings-status" role="status" aria-live="polite"></p>
+      </div>
+    </dialog>
+
+    <!-- הודעות בתוך הדף, לגיבוי כשהתראות הדפדפן חסומות -->
     <div id="toast-stack" class="toast-stack" aria-live="assertive" aria-atomic="false"></div>
 
     <footer class="page-footer">

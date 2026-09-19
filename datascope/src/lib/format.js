@@ -99,6 +99,25 @@ export function formatCompact(value) {
 }
 
 /**
+ * A price for a chart axis: readable at a glance but never rounded into a lie.
+ *
+ * `formatCompact` is right for volume, where 108.3K is the useful reading, and
+ * wrong for a price axis - a gridline labelled "64.2K" cannot be matched against
+ * a quote of 64,185.36, which is exactly what someone reading a chart is doing.
+ * Above 1,000 the decimals carry no information at gridline spacing, so they go;
+ * below it they are the whole point, so they stay.
+ *
+ * @param {number|null} value
+ */
+export function formatAxisPrice(value) {
+  if (value === null || value === undefined || !Number.isFinite(value)) return '—';
+  const abs = Math.abs(value);
+  if (abs >= 1000) return formatNumber(value, 0, 0);
+  if (abs >= 1) return formatNumber(value, 0, 2);
+  return formatPrice(value);
+}
+
+/**
  * Wall-clock time in the viewer's own timezone, which is the only timezone that
  * answers "how long ago was this".
  * @param {number|null} ts Epoch ms.

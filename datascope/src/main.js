@@ -25,7 +25,14 @@ import { buildHistoryCsv, safeFileName } from './lib/exporters.js';
 import { formatAge, formatClock, todayIso } from './lib/format.js';
 import { byId, clear, downloadText, el, show } from './ui/dom.js';
 import { renderPriceChart, renderVolumeChart } from './ui/charts.js';
-import { renderConnectionPills, renderIntradayStats, renderWatchCards } from './ui/dashboard.js';
+import {
+  directionOf,
+  renderConnectionPills,
+  renderHero,
+  renderIntradayStats,
+  renderWatchCards,
+} from './ui/dashboard.js';
+import { brandMark, icon } from './ui/icons.js';
 import { renderTicker } from './ui/ticker.js';
 import { fillAssetOptions, renderHistory, renderRules, showRuleErrors } from './ui/alerts-ui.js';
 import { Notifier, PERMISSION } from './ui/notifications.js';
@@ -50,6 +57,12 @@ const state = {
   /** @type {Record<string, string|null>} */
   diagnostics: {},
   selectedKey: null,
+  /** 'candles' | 'line' - which price chart the user last chose. */
+  chartMode: 'candles',
+  /** Last rendered price per asset, so a move can flash its direction. */
+  lastPrices: new Map(),
+  /** Alert ids that fired since the last render, for the arrival glow. */
+  freshAlertIds: new Set(),
   searchResults: [],
   searchIndex: -1,
   classFilter: 'all',
@@ -71,6 +84,7 @@ let renderQueued = false;
 function cacheElements() {
   const ids = [
     'ticker',
+    'brand-mark',
     'connection-pills',
     'enable-notifications',
     'toggle-sound',
@@ -87,8 +101,18 @@ function cacheElements() {
     'watch-cards',
     'detail-name',
     'detail-symbol',
+    'detail-class',
     'detail-source',
+    'hero-price',
+    'hero-change',
     'intraday-stats',
+    'tab-candles',
+    'tab-line',
+    'chart-range-note',
+    'watch-count',
+    'rules-count',
+    'history-count',
+    'close-settings',
     'price-chart',
     'price-tooltip',
     'volume-chart',
@@ -552,7 +576,10 @@ function alertTick() {
   state.diagnostics = diagnostics;
 
   if (events.length > 0) {
-    for (const event of events) notifier.notify(event);
+    for (const event of events) {
+      notifier.notify(event);
+      state.freshAlertIds.add(event.id);
+    }
     state.history.add(events);
     persistRules();
     persistHistory();
@@ -627,17 +654,25 @@ function render() {
           .filter((row) => row.quote);
   renderTicker(ui.ticker, topMovers(tickerRows, { limit: 14 }), { onSelect: selectAsset });
 
-  // Watchlist cards.
-  const rows = state.market.watchlist().map((asset) => ({
-    asset,
-    quote: state.market.quote(asset.key),
-    age: state.market.ageOf(asset.key, now),
-  }));
+  // Watchlist rows. A price that changed since the last paint flashes its
+  // direction, which is what makes a quiet dashboard readable at a glance.
+  const rows = state.market.watchlist().map((asset) => {
+    const quote = state.market.quote(asset.key);
+    const previous = state.lastPrices.get(asset.key);
+    const price = quote?.price ?? null;
+    let flash = null;
+    if (price !== null && previous !== undefined && price !== previous) {
+      flash = price > previous ? 'up' : 'down';
+    }
+    if (price !== null) state.lastPrices.set(asset.key, price);
+    return { asset, quote, age: state.market.ageOf(asset.key, now), flash };
+  });
   renderWatchCards(ui['watch-cards'], rows, {
     selectedKey: state.selectedKey,
     onSelect: selectAsset,
     onRemove: removeFromWatchlist,
   });
+  ui['watch-count'].textContent = String(rows.length);
 
   renderDetail(now);
 
@@ -661,7 +696,12 @@ function render() {
     },
   });
 
-  renderHistory(ui['history-list'], state.history.entries);
+  renderHistory(ui['history-list'], state.history.entries, { newIds: state.freshAlertIds });
+  // The glow plays once; clearing here stops it replaying on the next paint.
+  state.freshAlertIds = new Set();
+
+  ui['rules-count'].textContent = String(state.rules.length);
+  ui['history-count'].textContent = String(state.history.length);
 }
 
 function renderDetail(now) {
@@ -671,7 +711,11 @@ function renderDetail(now) {
   if (!asset) {
     ui['detail-name'].textContent = '—';
     ui['detail-symbol'].textContent = '';
+    ui['detail-class'].textContent = '';
     ui['detail-source'].textContent = '';
+    ui['chart-range-note'].textContent = '';
+    clear(ui['hero-price']);
+    clear(ui['hero-change']);
     clear(ui['intraday-stats']);
     clear(ui['price-chart']);
     clear(ui['volume-chart']);
@@ -681,6 +725,8 @@ function renderDetail(now) {
 
   ui['detail-name'].textContent = asset.name ?? asset.displaySymbol;
   ui['detail-symbol'].textContent = asset.name ? asset.displaySymbol : '';
+  ui['detail-class'].textContent = asset.assetClass === 'crypto' ? 'קריפטו' : 'מניה';
+  ui['detail-class'].className = `asset-chip chip-${asset.assetClass}`;
 
   const quote = state.market.quote(key);
   const series = state.market.series.peek(key);
@@ -688,12 +734,13 @@ function renderDetail(now) {
 
   const age = state.market.ageOf(key, now);
   ui['detail-source'].textContent = [
-    `מקור: ${sourceLabel(asset.provider)}`,
+    sourceLabel(asset.provider),
     stats.delayed ? 'ייתכן עיכוב' : 'זמן אמת',
-    age === null ? 'ממתין לנתונים' : `עודכן ${formatAge(age)} (${formatClock(stats.ts)})`,
+    age === null ? 'ממתין לנתונים' : `עודכן ${formatAge(age)} · ${formatClock(stats.ts)}`,
   ].join(' · ');
 
-  renderIntradayStats(ui['intraday-stats'], stats, asset);
+  renderHero(ui['hero-price'], ui['hero-change'], stats, asset);
+  renderIntradayStats(ui['intraday-stats'], stats);
 
   const candles = series?.candles ?? [];
   show(ui['chart-empty'], candles.length === 0);
@@ -701,23 +748,41 @@ function renderDetail(now) {
   const label = asset.name ? `${asset.name} / ${asset.displaySymbol}` : asset.displaySymbol;
   const compact = isCompact();
   if (candles.length > 0) {
-    renderPriceChart(ui['price-chart'], candles, {
+    // The price chart decides how much history fits its mode and returns that
+    // window, so the volume chart plots exactly the same buckets beneath it.
+    const shown = renderPriceChart(ui['price-chart'], candles, {
       label,
       tooltip: ui['price-tooltip'],
       readout: ui['chart-readout'],
       compact,
+      mode: state.chartMode,
       referencePrice: stats.prevClose ?? stats.open ?? null,
     });
-    renderVolumeChart(ui['volume-chart'], candles, {
+    renderVolumeChart(ui['volume-chart'], shown, {
       label,
       tooltip: ui['volume-tooltip'],
       readout: ui['chart-readout'],
       compact,
     });
+    ui['chart-range-note'].textContent = `${shown.length} נרות של דקה · ${formatClock(
+      shown[0].t,
+      { seconds: false },
+    )}–${formatClock(shown[shown.length - 1].t, { seconds: false })}`;
   } else {
     clear(ui['price-chart']);
     clear(ui['volume-chart']);
+    ui['chart-range-note'].textContent = '';
   }
+}
+
+/** @param {'candles'|'line'} mode */
+function setChartMode(mode) {
+  state.chartMode = mode;
+  ui['tab-candles'].setAttribute('aria-selected', mode === 'candles' ? 'true' : 'false');
+  ui['tab-line'].setAttribute('aria-selected', mode === 'line' ? 'true' : 'false');
+  state.settings = { ...state.settings, chartMode: mode };
+  saveSettings(state.settings);
+  requestRender();
 }
 
 function sourceLabel(provider) {
@@ -755,6 +820,18 @@ function wireEvents() {
   ui['rule-form'].addEventListener('submit', onRuleSubmit);
   ui['rule-type'].addEventListener('change', syncRuleFields);
 
+  for (const tab of [ui['tab-candles'], ui['tab-line']]) {
+    tab.addEventListener('click', () => setChartMode(tab.dataset.chartMode));
+    // Arrow keys move between tabs, which is what a tablist is expected to do.
+    tab.addEventListener('keydown', (event) => {
+      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+      const next = tab === ui['tab-candles'] ? ui['tab-line'] : ui['tab-candles'];
+      next.focus();
+      setChartMode(next.dataset.chartMode);
+      event.preventDefault();
+    });
+  }
+
   ui['enable-notifications'].addEventListener('click', async () => {
     await notifier.requestPermission();
     state.settings = { ...state.settings, notificationsRequested: true };
@@ -768,14 +845,17 @@ function wireEvents() {
     if (enabled) notifier.unlockAudio();
     state.settings = { ...state.settings, soundEnabled: enabled };
     saveSettings(state.settings);
-    ui['toggle-sound'].textContent = enabled ? '🔔 צליל פעיל' : '🔕 צליל כבוי';
+    ui['toggle-sound'].textContent = enabled ? 'צליל פעיל' : 'צליל כבוי';
     ui['toggle-sound'].setAttribute('aria-pressed', enabled ? 'true' : 'false');
   });
 
+  // A native <dialog> gives the focus trap, the Escape handler and the inert
+  // backdrop for free - the same guarantees a component library's modal is
+  // built to provide.
   ui['toggle-settings'].addEventListener('click', () => {
-    const hidden = ui['settings-panel'].hidden;
-    show(ui['settings-panel'], hidden);
-    ui['toggle-settings'].setAttribute('aria-expanded', hidden ? 'true' : 'false');
+    const dialog = ui['settings-panel'];
+    if (typeof dialog.showModal === 'function') dialog.showModal();
+    else dialog.setAttribute('open', 'open');
   });
 
   ui['save-token'].addEventListener('click', () => {
@@ -872,14 +952,30 @@ function restoreState() {
       ? state.settings.selectedKey
       : (state.market.watchOrder[0] ?? null);
 
+  state.chartMode = state.settings.chartMode === 'line' ? 'line' : 'candles';
+
   if (state.settings.finnhubToken) ui['finnhub-token'].value = state.settings.finnhubToken;
-  ui['toggle-sound'].textContent = state.settings.soundEnabled ? '🔔 צליל פעיל' : '🔕 צליל כבוי';
+  ui['toggle-sound'].textContent = state.settings.soundEnabled ? 'צליל פעיל' : 'צליל כבוי';
   ui['toggle-sound'].setAttribute('aria-pressed', state.settings.soundEnabled ? 'true' : 'false');
+}
+
+/**
+ * Draws the brand mark and fills every `data-icon` slot in the static markup.
+ * Icons live in JS rather than in the HTML so there is exactly one definition
+ * of each glyph.
+ */
+function decorateStaticIcons() {
+  ui['brand-mark'].append(brandMark(30));
+  for (const node of document.querySelectorAll('[data-icon]')) {
+    node.prepend(icon(node.getAttribute('data-icon'), { size: 14 }));
+  }
 }
 
 function init() {
   cacheElements();
   restoreState();
+  decorateStaticIcons();
+  setChartMode(state.chartMode);
 
   notifier = new Notifier({
     soundEnabled: state.settings.soundEnabled,

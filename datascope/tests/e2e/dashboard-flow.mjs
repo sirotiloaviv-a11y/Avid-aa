@@ -233,19 +233,58 @@ async function main() {
       assert.match(text, /%/);
     });
 
-    await step('the charts render from the live series', async () => {
+    await step('the charts render as candles by default', async () => {
       await page.waitForSelector('#price-chart svg', { timeout: 15_000 });
-      assert.equal(await page.locator('#price-chart path.c-line').count(), 1);
-      assert.ok((await page.locator('#volume-chart .c-bar').count()) > 0);
+
+      const bodies = await page.locator('#price-chart .c-candle-body').count();
+      const wicks = await page.locator('#price-chart .c-candle-wick').count();
+      assert.ok(bodies > 5, `expected candle bodies, saw ${bodies}`);
+      assert.equal(wicks, bodies, 'every candle needs a wick and a body');
+      assert.equal(await page.locator('#price-chart path.c-line').count(), 0);
+
+      // Direction must survive without colour: up candles filled, down hollow.
+      const filled = await page.locator('#price-chart .c-candle-body.dir-up').count();
+      const hollow = await page.locator('#price-chart .c-candle-body.dir-down').count();
+      assert.equal(filled + hollow, bodies);
+
       assert.ok(await page.locator('#chart-empty').isHidden());
+      assert.equal(await page.locator('#tab-candles').getAttribute('aria-selected'), 'true');
     });
 
-    await step('intraday statistics are populated for the selected asset', async () => {
+    await step('the volume chart plots exactly the buckets the price chart drew', async () => {
+      const bodies = await page.locator('#price-chart .c-candle-body').count();
+      const bars = await page.locator('#volume-chart .c-bar').count();
+      // Bars are skipped only for a bucket with no volume at all.
+      assert.ok(bars > 0 && bars <= bodies, `${bars} bars against ${bodies} candles`);
+      assert.match(await page.locator('#chart-range-note').innerText(), /נרות של דקה/);
+    });
+
+    await step('the line tab switches the chart and persists the choice', async () => {
+      await page.click('#tab-line');
+      await page.waitForSelector('#price-chart path.c-line', { timeout: 10_000 });
+      assert.equal(await page.locator('#price-chart .c-candle-body').count(), 0);
+      assert.equal(await page.locator('#tab-line').getAttribute('aria-selected'), 'true');
+      assert.equal(await page.locator('#tab-candles').getAttribute('aria-selected'), 'false');
+
+      await page.reload({ waitUntil: 'load' });
+      await page.waitForSelector('#price-chart path.c-line', { timeout: 15_000 });
+      assert.equal(await page.locator('#tab-line').getAttribute('aria-selected'), 'true');
+
+      await page.click('#tab-candles');
+      await page.waitForSelector('#price-chart .c-candle-body', { timeout: 10_000 });
+    });
+
+    await step('the hero price and the intraday tiles are populated', async () => {
+      const hero = await page.locator('#hero-price').innerText();
+      assert.ok(hero.trim() !== '' && !hero.includes('—'), `hero price reads "${hero}"`);
+      assert.match(await page.locator('#hero-change').innerText(), /%/);
+
       const stats = await page.locator('#intraday-stats').innerText();
-      for (const label of ['מחיר אחרון', 'שינוי יומי', 'פתיחה', 'גבוה', 'נמוך', 'מחזור', 'עדכון אחרון']) {
+      for (const label of ['פתיחה', 'גבוה', 'נמוך', 'מחזור', 'עדכון אחרון']) {
         assert.ok(stats.includes(label), `missing ${label}`);
       }
       assert.equal(/—\s*$/.test(await page.locator('#detail-name').innerText()), false);
+      assert.match(await page.locator('#detail-class').innerText(), /קריפטו|מניה/);
     });
 
     await step('selecting another asset moves the whole detail panel', async () => {
@@ -285,8 +324,28 @@ async function main() {
       );
       const card = await page.locator('.price-card', { hasText: 'AAPL' }).innerText();
       assert.match(card, /Apple Inc\./);
-      // A polled source must say so rather than implying real time.
-      assert.match(card, /ייתכן עיכוב/);
+
+      // A polled source must say so rather than implying real time: a short
+      // badge on the row, the full wording on the row's tooltip and on the
+      // detail line above the chart.
+      assert.match(card, /עיכוב/);
+      const badge = page.locator('.price-card', { hasText: 'AAPL' }).locator('.badge-warn');
+      assert.match(await badge.getAttribute('title'), /ייתכן עיכוב/);
+
+      await page.locator('.price-card-main', { hasText: 'AAPL' }).click();
+      await page.waitForFunction(
+        () => document.querySelector('#detail-name')?.textContent?.includes('Apple'),
+        { timeout: 10_000 },
+      );
+      assert.match(await page.locator('#detail-source').innerText(), /ייתכן עיכוב/);
+
+      await page.locator('.price-card-main', { hasText: 'BTC/USDT' }).click();
+      await page.waitForFunction(
+        () => document.querySelector('#detail-name')?.textContent?.includes('Bitcoin'),
+        { timeout: 10_000 },
+      );
+      // And a streaming source says the opposite, on the same line.
+      assert.match(await page.locator('#detail-source').innerText(), /זמן אמת/);
     });
 
     await page.screenshot({ path: path.join(shots, 'dashboard.png'), fullPage: true });

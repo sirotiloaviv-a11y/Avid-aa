@@ -14,8 +14,23 @@
  */
 
 import { clear, el, num } from './dom.js';
+import { icon } from './icons.js';
 import { formatClock, formatDateTime, formatPrice } from '../lib/format.js';
 import { describeRule, RULE_TYPE_LABELS } from '../lib/alerts.js';
+
+/** The icon that stands for each rule type, in the list and in the history. */
+const TYPE_ICON = { price: 'target', percent: 'percent', volume: 'bar-chart' };
+
+/**
+ * Hebrew counts one, two and many differently, so "1 פעמים" reads as broken
+ * text rather than as a number.
+ * @param {number} count
+ */
+function formatTimes(count) {
+  if (count === 1) return 'פעם אחת';
+  if (count === 2) return 'פעמיים';
+  return `${count} פעמים`;
+}
 
 /**
  * @param {HTMLElement} container
@@ -55,7 +70,10 @@ export function renderRules(container, rules, options) {
       }),
     );
     if (asset?.name) head.append(el('span', { class: 'rule-name', text: asset.name }));
-    head.append(el('span', { class: 'rule-type', text: RULE_TYPE_LABELS[rule.type] ?? rule.type }));
+    const typeBadge = el('span', { class: 'badge badge-muted rule-type' });
+    typeBadge.append(icon(TYPE_ICON[rule.type] ?? 'bell', { size: 11 }));
+    typeBadge.append(el('span', { text: RULE_TYPE_LABELS[rule.type] ?? rule.type }));
+    head.append(typeBadge);
     item.append(head);
 
     item.append(el('p', { class: 'rule-description', text: describeRule(rule) }));
@@ -67,12 +85,17 @@ export function renderRules(container, rules, options) {
         text:
           rule.triggerCount === 0
             ? 'טרם הופעלה'
-            : `הופעלה ${rule.triggerCount} פעמים · אחרונה ${formatClock(rule.lastTriggeredAt)}`,
+            : `הופעלה ${formatTimes(rule.triggerCount)} · אחרונה ${formatClock(rule.lastTriggeredAt)}`,
       }),
     );
     if (!rule.armed && rule.enabled) {
       // Explains why a rule whose condition still holds is quiet.
       meta.append(el('span', { class: 'rule-state', text: 'ממתינה לאיפוס התנאי' }));
+    }
+    if (rule.enabled && rule.armed) {
+      const live = el('span', { class: 'badge badge-up' });
+      live.append(el('span', { text: 'דרוכה' }));
+      meta.append(live);
     }
     const diagnostic = options.diagnostics?.[rule.id];
     if (diagnostic) meta.append(el('span', { class: 'rule-diagnostic', text: diagnostic }));
@@ -92,9 +115,10 @@ export function renderRules(container, rules, options) {
 
     const remove = el('button', {
       class: 'button button-quiet button-small',
-      text: 'מחיקה',
       attrs: { type: 'button' },
     });
+    remove.append(icon('trash', { size: 12 }));
+    remove.append(el('span', { text: 'מחיקה' }));
     remove.addEventListener('click', () => options.onDelete(rule.id));
     actions.append(remove);
 
@@ -108,8 +132,10 @@ export function renderRules(container, rules, options) {
 /**
  * @param {HTMLElement} container
  * @param {import('../lib/alerts.js').AlertEvent[]} entries Newest first.
+ * @param {{newIds?: Set<string>}} [options] Ids that just fired; those rows get
+ *   the arrival glow exactly once.
  */
-export function renderHistory(container, entries) {
+export function renderHistory(container, entries, options = {}) {
   clear(container);
 
   if (entries.length === 0) {
@@ -123,12 +149,16 @@ export function renderHistory(container, entries) {
 
   for (const entry of entries) {
     const item = el('li', { class: `history-item type-${entry.type}` });
+    if (options.newIds?.has(entry.id)) item.classList.add('is-new');
 
     const head = el('div', { class: 'history-head' });
     head.append(el('time', { class: 'history-time', text: formatClock(entry.ts), attrs: { datetime: new Date(entry.ts).toISOString(), title: formatDateTime(entry.ts) } }));
     // The same "Name / SYMBOL" label the notification used.
     head.append(el('span', { class: 'history-asset', text: entry.title, attrs: { dir: 'auto' } }));
-    head.append(el('span', { class: 'history-type', text: RULE_TYPE_LABELS[entry.type] ?? entry.type }));
+    const typeBadge = el('span', { class: 'badge badge-muted history-type' });
+    typeBadge.append(icon(TYPE_ICON[entry.type] ?? 'bell', { size: 11 }));
+    typeBadge.append(el('span', { text: RULE_TYPE_LABELS[entry.type] ?? entry.type }));
+    head.append(typeBadge);
     item.append(head);
 
     item.append(el('p', { class: 'history-body', text: entry.body }));

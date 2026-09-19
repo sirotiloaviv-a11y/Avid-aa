@@ -99,6 +99,7 @@ export const KEYS = Object.freeze({
  * @property {boolean} soundEnabled
  * @property {boolean} notificationsRequested
  * @property {string|null} selectedKey
+ * @property {'candles'|'line'} chartMode
  */
 
 /** @returns {Settings} */
@@ -109,6 +110,7 @@ export function loadSettings() {
     soundEnabled: stored.soundEnabled !== false,
     notificationsRequested: stored.notificationsRequested === true,
     selectedKey: typeof stored.selectedKey === 'string' ? stored.selectedKey : null,
+    chartMode: stored.chartMode === 'line' ? 'line' : 'candles',
   };
 }
 

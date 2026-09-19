@@ -206,5 +206,12 @@ test('the page has no file input and no drop zone left anywhere', async () => {
   const html = await readFile(path.join(root, 'index.html'), 'utf8');
   assert.equal(/type\s*=\s*"file"/.test(html), false);
   assert.equal(/dropzone/i.test(html), false);
-  assert.equal(/CSV/.test(html.replace(/ייצוא ל־CSV/g, '')), false, 'CSV should only survive as an export label');
+  assert.equal(/ondrop|dataTransfer/i.test(html), false);
+
+  // CSV may still appear, but only as the alert-history *export* control -
+  // asserted by position rather than by the button's wording, so relabelling it
+  // does not quietly turn this check off.
+  const mentions = [...html.matchAll(/CSV/g)].length;
+  assert.equal(mentions, 1, `CSV appears ${mentions} times; only the export button may mention it`);
+  assert.match(html, /id="export-history"[\s\S]{0,160}CSV/);
 });

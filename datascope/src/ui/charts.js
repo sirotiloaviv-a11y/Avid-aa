@@ -2,35 +2,58 @@
  * The live price and volume charts: hand-built inline SVG, no charting library,
  * nothing fetched at runtime.
  *
- * Both charts plot the same candle window at the same horizontal positions, so
- * a spike in volume lines up with the price bar that caused it. Each shows a
- * single series, so neither carries a legend - the caption names what is
- * plotted, and exact values come from the hover tooltip or the keyboard readout.
+ * Two price modes share one geometry and one cursor:
+ *   - candles: wick plus body per bucket, the trading-platform default,
+ *   - line: a glowing path with an area wash under it.
+ *
+ * Up candles are *filled* and down candles are *hollow*. That is not decoration:
+ * emerald and red sit right at the colour-blind separation floor (ΔE 8.1 under
+ * deuteranopia), so direction gets a second channel that survives without hue.
+ *
+ * The volume chart plots the same buckets at the same x positions, so a spike in
+ * volume lines up with the candle that caused it.
  *
  * These redraw while prices move, so the caller throttles them with
  * requestAnimationFrame rather than rendering on every socket frame.
  */
 
 import { clear, svg, svgText } from './dom.js';
-import { formatClock, formatCompact, formatPrice } from '../lib/format.js';
+import { formatAxisPrice, formatClock, formatCompact, formatPrice } from '../lib/format.js';
 
 const GEOMETRIES = {
   price: {
-    wide: { width: 840, height: 300, top: 18, right: 58, bottom: 34, left: 64 },
-    compact: { width: 420, height: 280, top: 16, right: 30, bottom: 32, left: 54 },
+    wide: { width: 880, height: 290, top: 16, right: 62, bottom: 28, left: 16 },
+    compact: { width: 420, height: 240, top: 14, right: 52, bottom: 26, left: 10 },
   },
   volume: {
-    wide: { width: 840, height: 150, top: 14, right: 58, bottom: 34, left: 64 },
-    compact: { width: 420, height: 150, top: 12, right: 30, bottom: 32, left: 54 },
+    wide: { width: 880, height: 92, top: 10, right: 62, bottom: 22, left: 16 },
+    compact: { width: 420, height: 84, top: 8, right: 52, bottom: 22, left: 10 },
   },
 };
 
-const MAX_BAR_WIDTH = 24;
+/** How many buckets each mode shows. Candles need room to be readable. */
+const VISIBLE = {
+  candles: { wide: 110, compact: 46 },
+  line: { wide: 240, compact: 120 },
+};
+
+const MAX_BAR_WIDTH = 18;
 const BAR_GAP = 2;
 
 /** @param {'price'|'volume'} kind @param {boolean} compact */
 export function geometryFor(kind, compact) {
   return GEOMETRIES[kind][compact ? 'compact' : 'wide'];
+}
+
+/**
+ * The slice of history a mode shows.
+ * @param {import('../lib/model.js').Candle[]} candles
+ * @param {'candles'|'line'} mode
+ * @param {boolean} compact
+ */
+export function visibleWindow(candles, mode, compact) {
+  const limit = VISIBLE[mode]?.[compact ? 'compact' : 'wide'] ?? 120;
+  return candles.length > limit ? candles.slice(-limit) : candles;
 }
 
 /**
@@ -71,15 +94,17 @@ export function axisIndices(count, maxLabels = 6) {
   return [...picked].sort((a, b) => a - b);
 }
 
+function plotWidth(geometry) {
+  return geometry.width - geometry.left - geometry.right;
+}
+
 function slotCenter(geometry, index, count) {
-  const plotWidth = geometry.width - geometry.left - geometry.right;
-  const slot = plotWidth / Math.max(1, count);
+  const slot = plotWidth(geometry) / Math.max(1, count);
   return geometry.left + (index + 0.5) * slot;
 }
 
 function indexFromX(geometry, x, count) {
-  const plotWidth = geometry.width - geometry.left - geometry.right;
-  const slot = plotWidth / Math.max(1, count);
+  const slot = plotWidth(geometry) / Math.max(1, count);
   return Math.min(count - 1, Math.max(0, Math.floor((x - geometry.left) / slot)));
 }
 
@@ -102,15 +127,24 @@ function baseSvg(geometry, label) {
   return node;
 }
 
+/** Price axis on the inline end, the way a trading chart puts it. */
 function drawGrid(root, geometry, ticks, scaleY, formatTick) {
-  const plotWidth = geometry.width - geometry.left - geometry.right;
   for (const tick of ticks) {
     const y = scaleY(tick);
-    const line = svg('line', { x1: geometry.left, x2: geometry.left + plotWidth, y1: y, y2: y });
+    const line = svg('line', {
+      x1: geometry.left,
+      x2: geometry.left + plotWidth(geometry),
+      y1: y,
+      y2: y,
+    });
     line.classList.add('c-grid');
     root.append(line);
 
-    const text = svg('text', { x: geometry.left - 8, y: y + 4, 'text-anchor': 'end' });
+    const text = svg('text', {
+      x: geometry.left + plotWidth(geometry) + 8,
+      y: y + 3.5,
+      'text-anchor': 'start',
+    });
     text.classList.add('c-tick');
     root.append(svgText(text, formatTick(tick)));
   }
@@ -118,15 +152,19 @@ function drawGrid(root, geometry, ticks, scaleY, formatTick) {
 
 function drawTimeAxis(root, geometry, candles, maxLabels) {
   const y = geometry.height - geometry.bottom;
-  const plotWidth = geometry.width - geometry.left - geometry.right;
-  const baseline = svg('line', { x1: geometry.left, x2: geometry.left + plotWidth, y1: y, y2: y });
+  const baseline = svg('line', {
+    x1: geometry.left,
+    x2: geometry.left + plotWidth(geometry),
+    y1: y,
+    y2: y,
+  });
   baseline.classList.add('c-axis');
   root.append(baseline);
 
   for (const index of axisIndices(candles.length, maxLabels)) {
     const text = svg('text', {
       x: slotCenter(geometry, index, candles.length),
-      y: y + 19,
+      y: y + 16,
       'text-anchor': 'middle',
     });
     text.classList.add('c-tick');
@@ -148,7 +186,13 @@ function roundedTopPath(x, y, width, height, radius) {
   ].join(' ');
 }
 
-/** Pointer and keyboard cursor, shared by both charts. */
+/** Which way a candle closed. Flat counts as up, as every platform does. */
+function candleDirection(candle) {
+  return candle.close >= candle.open ? 'dir-up' : 'dir-down';
+}
+
+/* ------------------------------------------------------------------- cursor */
+
 function attachCursor({ node, geometry, candles, onMove }) {
   const cursor = svg('line', {
     y1: geometry.top,
@@ -216,22 +260,42 @@ function attachCursor({ node, geometry, candles, onMove }) {
   });
 }
 
-function makeCursorHandler({ tooltip, readout, geometry, label }) {
+function makeCursorHandler({ tooltip, readout, geometry, label, withOhlc }) {
   return (candle, index, x) => {
     if (!candle) {
       tooltip.hidden = true;
       return;
     }
     clear(tooltip);
+
     const time = document.createElement('div');
     time.className = 'tip-date';
     time.dir = 'ltr';
     time.textContent = formatClock(candle.t);
-    const price = document.createElement('div');
-    price.textContent = `מחיר: ${formatPrice(candle.close)}`;
+    tooltip.append(time);
+
+    if (withOhlc) {
+      // The four values a candle actually encodes, so the mark is readable as
+      // data rather than as a shape.
+      for (const [name, value] of [
+        ['פתיחה', candle.open],
+        ['גבוה', candle.high],
+        ['נמוך', candle.low],
+        ['סגירה', candle.close],
+      ]) {
+        const row = document.createElement('div');
+        row.textContent = `${name}: ${formatPrice(value)}`;
+        tooltip.append(row);
+      }
+    } else {
+      const price = document.createElement('div');
+      price.textContent = `מחיר: ${formatPrice(candle.close)}`;
+      tooltip.append(price);
+    }
+
     const volume = document.createElement('div');
     volume.textContent = `מחזור: ${formatCompact(candle.volume)}`;
-    tooltip.append(time, price, volume);
+    tooltip.append(volume);
     tooltip.hidden = false;
 
     const ratio = x / geometry.width;
@@ -247,25 +311,30 @@ function makeCursorHandler({ tooltip, readout, geometry, label }) {
   };
 }
 
+/* -------------------------------------------------------------- price chart */
+
 /**
- * Price line with an area wash and a marker on the latest point.
- *
  * @param {HTMLElement} container
- * @param {import('../lib/model.js').Candle[]} candles Ascending by time.
+ * @param {import('../lib/model.js').Candle[]} allCandles Ascending by time.
  * @param {{label: string, tooltip: HTMLElement, readout?: HTMLElement,
- *   compact?: boolean, referencePrice?: number|null}} options
+ *   compact?: boolean, mode?: 'candles'|'line', referencePrice?: number|null}} options
+ * @returns {import('../lib/model.js').Candle[]} The window actually drawn.
  */
-export function renderPriceChart(container, candles, options) {
+export function renderPriceChart(container, allCandles, options) {
+  const mode = options.mode === 'line' ? 'line' : 'candles';
   const geometry = geometryFor('price', options.compact);
   clear(container);
-  if (candles.length === 0) return;
+  if (allCandles.length === 0) return [];
 
-  const closes = candles.map((candle) => candle.close);
-  let min = Math.min(...closes);
-  let max = Math.max(...closes);
-  // Keep the reference price inside the frame: a chart that crops the level the
-  // day's change is measured against invites the wrong reading.
+  const candles = visibleWindow(allCandles, mode, options.compact);
+
+  // Candles need the full high/low range in frame; a line only needs closes.
+  const lows = mode === 'candles' ? candles.map((c) => c.low) : candles.map((c) => c.close);
+  const highs = mode === 'candles' ? candles.map((c) => c.high) : candles.map((c) => c.close);
+  let min = Math.min(...lows);
+  let max = Math.max(...highs);
   if (typeof options.referencePrice === 'number' && Number.isFinite(options.referencePrice)) {
+    // Keep the level the day's change is measured against inside the frame.
     min = Math.min(min, options.referencePrice);
     max = Math.max(max, options.referencePrice);
   }
@@ -274,28 +343,100 @@ export function renderPriceChart(container, candles, options) {
 
   const node = baseSvg(
     geometry,
-    `גרף מחיר חי עבור ${options.label}, ${candles.length} נרות. הערך המדויק זמין בהצבעה על הגרף או בניווט מקלדת.`,
+    `גרף מחיר חי עבור ${options.label}, ${candles.length} נרות של דקה. הערכים המדויקים זמינים בהצבעה על הגרף או בניווט מקלדת.`,
   );
 
-  drawGrid(node, geometry, ticks, scaleY, (tick) => formatCompact(tick));
-  drawTimeAxis(node, geometry, candles, options.compact ? 3 : 6);
+  drawGrid(node, geometry, ticks, scaleY, (tick) => formatAxisPrice(tick));
 
   if (typeof options.referencePrice === 'number' && Number.isFinite(options.referencePrice)) {
     const y = scaleY(options.referencePrice);
-    const line = svg('line', {
-      x1: geometry.left,
-      x2: geometry.width - geometry.right,
-      y1: y,
-      y2: y,
-    });
+    const line = svg('line', { x1: geometry.left, x2: geometry.left + plotWidth(geometry), y1: y, y2: y });
     line.classList.add('c-reference');
     node.append(line);
   }
 
+  if (mode === 'candles') drawCandles(node, geometry, candles, scaleY);
+  else drawLine(node, geometry, candles, scaleY);
+
+  drawTimeAxis(node, geometry, candles, options.compact ? 3 : 6);
+
+  container.append(node);
+  attachCursor({
+    node,
+    geometry,
+    candles,
+    onMove: makeCursorHandler({ ...options, geometry, withOhlc: mode === 'candles' }),
+  });
+  return candles;
+}
+
+function drawCandles(root, geometry, candles, scaleY) {
+  const slot = plotWidth(geometry) / candles.length;
+  const bodyWidth = Math.max(1.5, Math.min(14, slot - 2));
+  const lastIndex = candles.length - 1;
+
+  candles.forEach((candle, index) => {
+    const direction = candleDirection(candle);
+    const isLive = index === lastIndex;
+    const center = slotCenter(geometry, index, candles.length);
+
+    const wick = svg('line', {
+      x1: center,
+      x2: center,
+      y1: scaleY(candle.high),
+      y2: scaleY(candle.low),
+    });
+    wick.classList.add('c-candle-wick', direction);
+    if (isLive) wick.classList.add('is-live');
+    root.append(wick);
+
+    const top = scaleY(Math.max(candle.open, candle.close));
+    const bottom = scaleY(Math.min(candle.open, candle.close));
+    // A doji would be invisible at zero height, so it keeps a 1px body.
+    const height = Math.max(1, bottom - top);
+
+    const body = svg('rect', {
+      x: center - bodyWidth / 2,
+      y: top,
+      width: bodyWidth,
+      height,
+      rx: Math.min(1.5, bodyWidth / 3),
+    });
+    body.classList.add('c-candle-body', direction);
+    if (isLive) body.classList.add('is-live');
+    root.append(body);
+  });
+}
+
+function drawLine(root, geometry, candles, scaleY) {
   const points = candles.map((candle, index) => ({
     x: slotCenter(geometry, index, candles.length),
     y: scaleY(candle.close),
   }));
+
+  // The period's own direction tints the line and the wash beneath it.
+  const rising = candles[candles.length - 1].close >= candles[0].close;
+  const direction = rising ? 'dir-up' : 'dir-down';
+  const gradientId = `ds-area-${rising ? 'up' : 'down'}`;
+
+  const defs = svg('defs');
+  const gradient = svg('linearGradient', { id: gradientId, x1: '0', y1: '0', x2: '0', y2: '1' });
+  gradient.append(
+    svg('stop', {
+      offset: '0',
+      'stop-color': rising ? '#10b981' : '#ef4444',
+      'stop-opacity': '0.28',
+    }),
+  );
+  gradient.append(
+    svg('stop', {
+      offset: '1',
+      'stop-color': rising ? '#10b981' : '#ef4444',
+      'stop-opacity': '0',
+    }),
+  );
+  defs.append(gradient);
+  root.append(defs);
 
   if (points.length > 1) {
     const baseline = geometry.height - geometry.bottom;
@@ -306,48 +447,45 @@ export function renderPriceChart(container, candles, options) {
         `L ${points[points.length - 1].x} ${baseline}`,
         'Z',
       ].join(' '),
+      fill: `url(#${gradientId})`,
     });
     area.classList.add('c-area');
-    node.append(area);
+    root.append(area);
 
     const line = svg('path', {
       d: points.map((point, i) => `${i === 0 ? 'M' : 'L'} ${point.x} ${point.y}`).join(' '),
       fill: 'none',
     });
-    line.classList.add('c-line');
-    node.append(line);
+    line.classList.add('c-line', direction);
+    root.append(line);
   }
 
   // One direct label, on the live price. Labelling every point would be
-  // unreadable at 240 candles and pointless while they are all moving.
+  // unreadable at this density and pointless while they are all moving.
   const last = points[points.length - 1];
-  const dot = svg('circle', { cx: last.x, cy: last.y, r: 4.5 });
+  const dot = svg('circle', { cx: last.x, cy: last.y, r: 4 });
   dot.classList.add('c-dot', 'c-dot-live');
-  node.append(dot);
+  root.append(dot);
 
   const label = svg('text', {
-    x: last.x,
-    y: last.y < geometry.top + 18 ? last.y + 20 : last.y - 12,
+    x: last.x - 8,
+    y: last.y < geometry.top + 16 ? last.y + 18 : last.y - 10,
     'text-anchor': 'end',
   });
   label.classList.add('c-point-label');
-  node.append(svgText(label, formatPrice(candles[candles.length - 1].close)));
-
-  container.append(node);
-  attachCursor({
-    node,
-    geometry,
-    candles,
-    onMove: makeCursorHandler({ ...options, geometry }),
-  });
+  root.append(svgText(label, formatPrice(candles[candles.length - 1].close)));
 }
 
+/* ------------------------------------------------------------- volume chart */
+
 /**
- * Volume columns, from a zero baseline - a volume chart without one misstates
- * the ratios between its own bars.
+ * Volume columns from a zero baseline, tinted by the direction of the candle
+ * they belong to - a volume chart without a zero baseline misstates the ratios
+ * between its own bars.
  *
  * @param {HTMLElement} container
- * @param {import('../lib/model.js').Candle[]} candles
+ * @param {import('../lib/model.js').Candle[]} candles The same window the price
+ *   chart drew, so the two line up bucket for bucket.
  * @param {{label: string, tooltip: HTMLElement, readout?: HTMLElement, compact?: boolean}} options
  */
 export function renderVolumeChart(container, candles, options) {
@@ -356,19 +494,17 @@ export function renderVolumeChart(container, candles, options) {
   if (candles.length === 0) return;
 
   const volumes = candles.map((candle) => candle.volume);
-  const { ticks, lo, hi } = niceScale(0, Math.max(...volumes, 1), 3);
+  const { ticks, lo, hi } = niceScale(0, Math.max(...volumes, 1), 2);
   const scaleY = yScaler(geometry, Math.min(0, lo), hi);
   const baseline = scaleY(0);
 
   const node = baseSvg(geometry, `גרף מחזור חי עבור ${options.label}, ${candles.length} נרות.`);
   drawGrid(node, geometry, ticks, scaleY, (tick) => formatCompact(tick));
 
-  const plotWidth = geometry.width - geometry.left - geometry.right;
-  const slot = plotWidth / candles.length;
-  // A 2px surface gap and a rounded data-end, but only while the slot is wide
-  // enough for either to be visible.
+  const slot = plotWidth(geometry) / candles.length;
   const wide = slot - BAR_GAP >= 4;
   const barWidth = wide ? Math.min(MAX_BAR_WIDTH, slot - BAR_GAP) : Math.max(0.8, slot * 0.8);
+  const lastIndex = candles.length - 1;
 
   candles.forEach((candle, index) => {
     const center = slotCenter(geometry, index, candles.length);
@@ -377,21 +513,19 @@ export function renderVolumeChart(container, candles, options) {
     if (height <= 0) return;
     const x = center - barWidth / 2;
     const mark =
-      barWidth >= 8 && height > 6
-        ? svg('path', { d: roundedTopPath(x, baseline - height, barWidth, height, 4) })
+      barWidth >= 6 && height > 5
+        ? svg('path', { d: roundedTopPath(x, baseline - height, barWidth, height, 2) })
         : svg('rect', { x, y: baseline - height, width: barWidth, height });
-    mark.classList.add('c-bar');
-    if (index === candles.length - 1) mark.classList.add('c-bar-live');
+    mark.classList.add('c-bar', candleDirection(candle));
+    if (index === lastIndex) mark.classList.add('c-bar-live');
     node.append(mark);
   });
-
-  drawTimeAxis(node, geometry, candles, options.compact ? 3 : 6);
 
   container.append(node);
   attachCursor({
     node,
     geometry,
     candles,
-    onMove: makeCursorHandler({ ...options, geometry }),
+    onMove: makeCursorHandler({ ...options, geometry, withOhlc: false }),
   });
 }

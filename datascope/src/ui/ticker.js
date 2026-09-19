@@ -12,6 +12,7 @@
  */
 
 import { clear, el, num } from './dom.js';
+import { icon } from './icons.js';
 import { formatPercent, formatPrice } from '../lib/format.js';
 
 /**
@@ -55,13 +56,13 @@ function buildStrip(movers, options, isDuplicate) {
 
     item.append(el('span', { class: 'ticker-symbol', text: asset.displaySymbol, attrs: { dir: 'ltr' } }));
     item.append(num(formatPrice(quote.price), 'ticker-price'));
-    item.append(
-      el('span', {
-        class: 'ticker-arrow',
-        text: direction === 'up' ? '▲' : direction === 'down' ? '▼' : '■',
-        attrs: { 'aria-hidden': 'true' },
+    const arrow = el('span', { class: 'ticker-arrow', attrs: { 'aria-hidden': 'true' } });
+    arrow.append(
+      icon(direction === 'up' ? 'trending-up' : direction === 'down' ? 'trending-down' : 'minus', {
+        size: 12,
       }),
     );
+    item.append(arrow);
     item.append(num(formatPercent(quote.changePct), 'ticker-change'));
 
     if (options.onSelect) {

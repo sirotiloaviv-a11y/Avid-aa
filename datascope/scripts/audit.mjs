@@ -210,6 +210,7 @@ export const SHIPPED_FILES = Object.freeze([
   'src/providers/coingecko.js',
   'src/providers/connection.js',
   'src/ui/dom.js',
+  'src/ui/icons.js',
   'src/ui/charts.js',
   'src/ui/dashboard.js',
   'src/ui/ticker.js',
