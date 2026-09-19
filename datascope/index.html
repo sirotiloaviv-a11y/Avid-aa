@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DataScope — כלי לימודי לניתוח נתונים היסטוריים</title>
+    <meta
+      name="description"
+      content="כלי לימודי מקומי לייבוא, בדיקה והצגה של נתוני מחירים היסטוריים מקובץ CSV. הנתונים מעובדים בדפדפן בלבד."
+    />
+    <!-- No external stylesheet, font, script or analytics: everything this page
+         loads comes from this folder, and nothing it reads leaves the browser. -->
+    <link rel="stylesheet" href="src/styles.css" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%232a78d6'/%3E%3Cpath d='M3 11.5 6 7l3 2.5L13 4' stroke='%23fff' stroke-width='1.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"
+    />
+  </head>
+  <body>
+    <a class="skip-link" href="#main">דילוג לתוכן הראשי</a>
+
+    <header class="page-header">
+      <div class="header-inner">
+        <h1>DataScope</h1>
+        <p class="tagline">כלי לימודי לניתוח נתונים היסטוריים</p>
+        <p class="header-note">
+          הכלי מייבא קובץ CSV של נתונים היסטוריים, בודק אותו, מציג גרפים ומסביר סטטיסטיקה תיאורית.
+          אין בו נתוני זמן אמת, אין בו המלצות קנייה או מכירה, אין בו תחזיות ואין בו חיבור לברוקר.
+          כל העיבוד מתבצע בדפדפן שלך.
+        </p>
+      </div>
+    </header>
+
+    <main id="main">
+      <!-- ================= ייבוא ================= -->
+      <section class="panel" aria-labelledby="import-heading">
+        <h2 id="import-heading">ייבוא נתונים</h2>
+
+        <div
+          id="dropzone"
+          class="dropzone"
+          role="group"
+          aria-labelledby="dropzone-title"
+          aria-describedby="dropzone-help"
+        >
+          <p id="dropzone-title" class="dropzone-title">גרירת קובץ CSV לכאן, או בחירה מהמחשב</p>
+          <p id="dropzone-help" class="dropzone-help">
+            עמודות חובה: <code dir="ltr">date,symbol,close,volume</code> · קידוד UTF-8 · עד 5 מ״ב ·
+            עד 50,000 שורות נתונים
+          </p>
+          <div class="dropzone-actions">
+            <button id="file-button" class="button button-primary" type="button">
+              בחירת קובץ CSV
+            </button>
+            <input
+              id="file-input"
+              class="visually-hidden"
+              type="file"
+              accept=".csv,text/csv,text/plain"
+              tabindex="-1"
+              aria-hidden="true"
+            />
+            <button id="load-demo" class="button" type="button">טעינת דוגמה</button>
+            <button id="download-sample" class="button" type="button">הורדת CSV לדוגמה</button>
+            <button id="clear-data" class="button button-quiet" type="button" disabled>
+              ניקוי נתונים
+            </button>
+          </div>
+        </div>
+
+        <details class="format-help">
+          <summary>תבנית הקובץ הנדרשת</summary>
+          <ul>
+            <li><code dir="ltr">date</code> — תאריך קיים בתבנית <code dir="ltr">YYYY-MM-DD</code>.</li>
+            <li><code dir="ltr">symbol</code> — מזהה שאינו ריק (עד 64 תווים).</li>
+            <li><code dir="ltr">close</code> — מספר סופי וחיובי, ללא פסיקים וללא סימני מטבע.</li>
+            <li><code dir="ltr">volume</code> — מספר סופי שאינו שלילי.</li>
+            <li>כל צמד <code dir="ltr">symbol</code> + <code dir="ltr">date</code> יכול להופיע פעם אחת בלבד.</li>
+            <li>עמודות נוספות מותרות, והכלי מתעלם מהן.</li>
+          </ul>
+          <pre dir="ltr" class="code-block">date,symbol,close,volume
+2024-01-02,DEMO_A,100.42,1357404
+2024-01-03,DEMO_A,100.68,822569</pre>
+          <p>
+            תאריכים חסרים (סופי שבוע, חגים או ימים שאין עליהם רשומה) אינם שגיאה, והכלי אינו משלים
+            אותם ואינו מעריך ערכים במקומם.
+          </p>
+        </details>
+
+        <!-- מצב טעינה -->
+        <p id="loading" class="loading" role="status" hidden>
+          <span class="spinner" aria-hidden="true"></span>
+          <span id="loading-text">קורא את הקובץ…</span>
+        </p>
+
+        <!-- הודעות מצב -->
+        <p id="status-message" class="status-message" role="status" aria-live="polite" hidden></p>
+
+        <!-- דוח שגיאות ולידציה -->
+        <div
+          id="validation-report"
+          class="validation-report"
+          role="region"
+          aria-live="assertive"
+          aria-label="דוח בדיקת הקובץ"
+          tabindex="-1"
+          hidden
+        ></div>
+      </section>
+
+      <!-- ================= מצב ריק ================= -->
+      <section id="empty-state" class="panel empty-state" aria-labelledby="empty-heading">
+        <h2 id="empty-heading">עדיין לא נטענו נתונים</h2>
+        <p>
+          כדי להתחיל, אפשר ללחוץ על <strong>טעינת דוגמה</strong> ולקבל נתוני הדגמה מומצאים
+          (DEMO_A, DEMO_B, DEMO_C), או לטעון קובץ CSV משלך. אין צורך בחשבון, במפתח API או בחיבור
+          לשירות חיצוני.
+        </p>
+      </section>
+
+      <!-- ================= ניתוח ================= -->
+      <section id="analysis" class="analysis" aria-labelledby="analysis-heading" hidden>
+        <h2 id="analysis-heading" class="visually-hidden">ניתוח הנתונים</h2>
+
+        <div class="panel" aria-labelledby="source-heading">
+          <h3 id="source-heading">מקור הנתונים</h3>
+          <div id="source-banner"></div>
+        </div>
+
+        <div class="panel controls" aria-labelledby="controls-heading">
+          <h3 id="controls-heading">בחירת סמל וטווח תאריכים</h3>
+          <div class="controls-grid">
+            <div class="control">
+              <label for="symbol-search">חיפוש סמל</label>
+              <input
+                id="symbol-search"
+                type="search"
+                autocomplete="off"
+                placeholder="לדוגמה: DEMO"
+                dir="ltr"
+                aria-describedby="symbol-count"
+              />
+              <p id="symbol-count" class="control-note"></p>
+            </div>
+            <div class="control">
+              <label for="symbol-select">סמל נבחר</label>
+              <select id="symbol-select" dir="ltr" size="1"></select>
+              <p class="control-note">הסמלים נלקחים מעמודת <code dir="ltr">symbol</code> שבקובץ שנטען.</p>
+            </div>
+            <div class="control">
+              <label for="date-from">מתאריך</label>
+              <input id="date-from" type="date" dir="ltr" />
+            </div>
+            <div class="control">
+              <label for="date-to">עד תאריך</label>
+              <input id="date-to" type="date" dir="ltr" />
+            </div>
+            <div class="control control-actions">
+              <button id="reset-range" class="button button-quiet" type="button">
+                איפוס טווח התאריכים
+              </button>
+            </div>
+          </div>
+          <p id="range-message" class="range-message" role="status" aria-live="polite" hidden></p>
+        </div>
+
+        <!-- אין תוצאות -->
+        <div id="no-results" class="panel no-results" hidden>
+          <h3>אין תצפיות בטווח שנבחר</h3>
+          <p id="no-results-text"></p>
+        </div>
+
+        <div id="results" class="results">
+          <div class="panel" aria-labelledby="stats-heading">
+            <h3 id="stats-heading">סטטיסטיקה תיאורית</h3>
+            <p class="panel-note">
+              כל המספרים מחושבים בקוד מהתצפיות שנבחרו. ערכי הביניים אינם מעוגלים; העיגול הוא לתצוגה
+              בלבד.
+            </p>
+            <div id="stats-grid" class="stats-grid"></div>
+          </div>
+
+          <div class="panel" aria-labelledby="charts-heading">
+            <h3 id="charts-heading">גרפים</h3>
+            <p class="panel-note">
+              הציר האופקי מציג את התצפיות ברווחים שווים, ולא לפי לוח השנה: ימים שאין עליהם רשומה
+              בקובץ אינם מופיעים כרווח. המחירים מוצגים ללא מטבע, מפני שהקובץ אינו מציין מטבע.
+            </p>
+
+            <figure class="chart-figure">
+              <figcaption id="price-chart-caption">מחיר סגירה</figcaption>
+              <div id="price-chart-wrap" class="chart-wrap" dir="ltr">
+                <div id="price-chart" class="chart-canvas"></div>
+                <div id="price-tooltip" class="chart-tooltip" role="presentation" hidden></div>
+              </div>
+            </figure>
+
+            <figure class="chart-figure">
+              <figcaption id="volume-chart-caption">מחזור</figcaption>
+              <div id="volume-chart-wrap" class="chart-wrap" dir="ltr">
+                <div id="volume-chart" class="chart-canvas"></div>
+                <div id="volume-tooltip" class="chart-tooltip" role="presentation" hidden></div>
+              </div>
+            </figure>
+
+            <p class="chart-hint">
+              אפשר להזיז את הסמן עם העכבר, או להתמקד בגרף במקלדת (Tab) ולנוע עם חצים ימינה ושמאלה,
+              Home ו־End. הערך שנקרא מופיע כאן:
+            </p>
+            <p id="chart-readout" class="chart-readout" role="status" aria-live="polite"></p>
+          </div>
+
+          <div class="panel" aria-labelledby="summary-heading">
+            <h3 id="summary-heading">סיכום אוטומטי</h3>
+            <p class="panel-note">
+              הסיכום נוצר מקומית מתבניות טקסט בקוד הכלי, על בסיס המספרים שחושבו. לא נעשה שימוש
+              במודל בינה מלאכותית ולא נשלחה בקשה לשירות חיצוני.
+            </p>
+            <div id="summary-body" class="summary-body"></div>
+          </div>
+
+          <div class="panel" aria-labelledby="export-heading">
+            <h3 id="export-heading">ייצוא</h3>
+            <p class="panel-note">
+              הייצוא נוצר בדפדפן מהנתונים שנבחרו. שם הקובץ כולל את הסמל ואת תאריך הייצוא.
+            </p>
+            <div class="export-actions">
+              <button id="export-csv" class="button" type="button">הורדת הנתונים המסוננים (CSV)</button>
+              <button id="export-report" class="button" type="button">הורדת דוח בעברית (TXT)</button>
+            </div>
+          </div>
+
+          <div class="panel" aria-labelledby="table-heading">
+            <h3 id="table-heading">טבלת נתונים</h3>
+            <div class="table-controls">
+              <div class="control">
+                <label for="page-size">שורות בעמוד</label>
+                <select id="page-size">
+                  <option value="10">10</option>
+                  <option value="25" selected>25</option>
+                  <option value="50">50</option>
+                  <option value="100">100</option>
+                </select>
+              </div>
+              <div class="pager">
+                <button id="page-prev" class="button button-quiet" type="button">הקודם</button>
+                <span id="page-info" class="page-info"></span>
+                <button id="page-next" class="button button-quiet" type="button">הבא</button>
+              </div>
+            </div>
+            <div id="table-container" class="table-container"></div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="page-footer">
+      <p>
+        <strong>פרטיות:</strong> הקובץ נקרא בדפדפן בלבד. תוכנו אינו נשלח לשרת, אינו נשמר בין
+        ביקורים, ואין בדף מדידות, טלמטריה או משאבים חיצוניים. לחיצה על «ניקוי נתונים» מוחקת את
+        הנתונים והמצב מהמסך.
+      </p>
+      <p>
+        <strong>מגבלות:</strong> התוצאות תלויות בשאלה אם המחירים בקובץ מתואמים לפיצולים
+        ולדיבידנדים — הכלי אינו מבצע התאמות כאלה ואינו יכול לדעת אם בוצעו. אין הנחה שכל הסמלים
+        נקובים באותו מטבע, ואין הסקה של סיבת תנועת מחיר מהמחיר עצמו.
+      </p>
+    </footer>
+
+    <script type="module" src="src/main.js"></script>
+  </body>
+</html>

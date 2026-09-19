@@ -1,0 +1,21 @@
+{
+  "name": "datascope",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "DataScope - a local, browser-only educational tool for exploring historical financial CSV data (Hebrew UI)",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node scripts/serve.mjs",
+    "preview": "node scripts/serve.mjs --dir dist",
+    "build": "node scripts/build.mjs",
+    "test": "node --test \"tests/*.test.js\"",
+    "test:e2e": "node tests/e2e/demo-flow.mjs",
+    "sample": "node scripts/write-sample.mjs"
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}
