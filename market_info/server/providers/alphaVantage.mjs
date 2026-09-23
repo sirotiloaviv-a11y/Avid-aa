@@ -68,10 +68,13 @@ export function mapDailySeries(body, symbol) {
   return { symbol: meta['2. Symbol'] ?? symbol, lastRefreshed: meta['3. Last Refreshed'] ?? null, timeZone: tz, bars, dropped };
 }
 
-export async function fetchDailySeries({ apiKey, baseUrl, timeoutMs }, symbol, fetchImpl) {
+// `inspect` receives the raw HTTP answer before mapping; the connection
+// check uses it to verify the response format against real data.
+export async function fetchDailySeries({ apiKey, baseUrl, timeoutMs }, symbol, fetchImpl, { inspect } = {}) {
   const url = new URL(baseUrl);
   url.search = new URLSearchParams({ function: 'TIME_SERIES_DAILY', symbol, outputsize: 'compact', apikey: apiKey });
   const res = await fetchJson(fetchImpl, url, { timeoutMs, provider: ALPHA_VANTAGE.name });
+  inspect?.(res);
   if (res.status >= 400 && res.body === null && res.status !== 429) throw errors.blocked(ALPHA_VANTAGE.name, res.status);
   if (res.status === 429) throw errors.rateLimited(ALPHA_VANTAGE.name, retryAfterSeconds(res.headers, 60));
   if (res.status === 401 || res.status === 403) throw errors.authFailed(ALPHA_VANTAGE.name);

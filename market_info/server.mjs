@@ -2,6 +2,7 @@
 // the app is not reachable from other machines.
 import { createServer } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import { extname, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadConfig } from './server/config.mjs';
@@ -29,7 +30,10 @@ const host = process.env.HOST ?? '127.0.0.1';
 export function createDefaultMarketService() {
   const config = loadConfig({ envFile: join(here, '.env') });
   const cache = new MarketCache({ file: join(here, '.cache', 'market-cache.json') });
-  return { config, service: createMarketService({ config, cache }) };
+  const lastCheck = () => {
+    try { return JSON.parse(readFileSync(join(here, '.cache', 'connection-check.json'), 'utf8')); } catch { return null; }
+  };
+  return { config, service: createMarketService({ config, cache, lastCheck }) };
 }
 
 export function createAppServer(dir = root, { market = null } = {}) {

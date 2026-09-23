@@ -4,12 +4,15 @@
   "private": true,
   "description": "אבטיפוס מקומי למערכת מידע על מניות וקריפטו — נתוני הדגמה בלבד",
   "type": "module",
-  "engines": { "node": ">=18" },
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "start": "node server.mjs src",
     "build": "node scripts/build.mjs",
     "preview": "node server.mjs dist",
     "test": "node --test tests/*.test.mjs",
-    "e2e": "node scripts/e2e.mjs"
+    "e2e": "node scripts/e2e.mjs",
+    "check-connection": "node scripts/check-connection.mjs"
   }
 }

@@ -40,6 +40,29 @@ function usageLine(p) {
   return parts.join(' · ');
 }
 
+const CHECK_LABELS = {
+  passed: 'עבר', failed: 'נכשל', setup_required: 'נדרשת הגדרה', partial: 'חלקי',
+};
+
+// The connection is described as verified only after a real check passed.
+function checkStatus(status, tz) {
+  const c = status.lastCheck;
+  const how = `<p class="small">להרצת בדיקה: לחיצה כפולה על <code dir="ltr">check-connection-windows.bat</code> (Windows)
+    או <code dir="ltr">check-connection-mac.command</code> (Mac), או <code dir="ltr">npm run check-connection</code> בטרמינל.
+    הבדיקה שולחת עד 3 בקשות לספקים ושומרת דוח ללא מפתחות בקובץ <code dir="ltr">connection-report.txt</code>.</p>`;
+  if (!c) {
+    return `<div class="check-box unverified" data-check="none"><strong>החיבור לספקים טרם אומת.</strong>
+      <span>בדיקת חיבור מול הספקים האמיתיים עוד לא הורצה במחשב זה.</span>${how}</div>`;
+  }
+  const ok = c.overall === 'passed';
+  return `<div class="check-box ${ok ? 'verified' : 'unverified'}" data-check="${esc(c.overall)}">
+    <strong>${ok ? 'החיבור לשני הספקים אומת בבדיקה האחרונה.' : 'החיבור לספקים טרם אומת במלואו.'}</strong>
+    <span>בדיקה אחרונה: ${esc(formatDateTime(c.ranAt, tz))} — ${esc(CHECK_LABELS[c.overall] ?? c.overall)}</span>
+    <ul>${c.providers.map((p) => `<li>${esc(p.name)}: ${esc(CHECK_LABELS[p.status] ?? p.status)}${
+      p.contradicted ? ` (${p.contradicted} הנחות על פורמט התשובה לא תאמו)` : ''}${p.error ? ` — ${esc(p.error)}` : ''}</li>`).join('')}</ul>
+    ${how}</div>`;
+}
+
 function providerStatus(status, tz) {
   const row = (label, p) => `<div class="provider ${p.configured ? 'ok' : 'setup'}" data-provider="${esc(p.id)}">
       <h3>${esc(label)}: ${esc(p.name)} ${p.configured
@@ -54,6 +77,7 @@ function providerStatus(status, tz) {
     </div>`;
   const anyMissing = !status.providers.stocks.configured || !status.providers.crypto.configured;
   return `
+    ${checkStatus(status, tz)}
     ${row('מניות', status.providers.stocks)}
     ${row('קריפטו', status.providers.crypto)}
     <p class="small">נכסים מוגדרים — מניות: ${status.universe.stocks.map((s) => ltr(s)).join(', ') || 'אין'};

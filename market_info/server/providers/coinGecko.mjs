@@ -71,18 +71,20 @@ function headers(apiKey) {
   return { accept: 'application/json', 'x-cg-demo-api-key': apiKey };
 }
 
-export async function fetchMarkets({ apiKey, baseUrl, timeoutMs }, ids, fetchImpl) {
+export async function fetchMarkets({ apiKey, baseUrl, timeoutMs }, ids, fetchImpl, { inspect } = {}) {
   const url = new URL(`${baseUrl.replace(/\/$/, '')}/coins/markets`);
   url.search = new URLSearchParams({ vs_currency: 'usd', ids: ids.join(','), price_change_percentage: '24h' });
   const res = await fetchJson(fetchImpl, url, { headers: headers(apiKey), timeoutMs, provider: COINGECKO.name });
+  inspect?.(res);
   checkStatus(res, ids.join(','));
   return mapMarkets(res.body);
 }
 
-export async function fetchMarketChart({ apiKey, baseUrl, timeoutMs }, id, days, fetchImpl) {
+export async function fetchMarketChart({ apiKey, baseUrl, timeoutMs }, id, days, fetchImpl, { inspect } = {}) {
   const url = new URL(`${baseUrl.replace(/\/$/, '')}/coins/${encodeURIComponent(id)}/market_chart`);
   url.search = new URLSearchParams({ vs_currency: 'usd', days: String(days), interval: 'daily' });
   const res = await fetchJson(fetchImpl, url, { headers: headers(apiKey), timeoutMs, provider: COINGECKO.name });
+  inspect?.(res);
   checkStatus(res, id);
   return mapMarketChart(res.body);
 }

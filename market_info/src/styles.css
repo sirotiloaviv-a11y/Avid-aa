@@ -301,6 +301,11 @@ code { background: var(--surface-2); border: 1px solid var(--border); border-rad
 code.block { display: block; width: fit-content; max-width: 100%; overflow-wrap: anywhere; margin: 4px 0; }
 details summary { cursor: pointer; margin: 8px 0; }
 
+.check-box { display: flex; flex-direction: column; gap: 4px; border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; }
+.check-box.unverified { border: 1px solid var(--warn-border); background: var(--warn-bg); color: var(--warn-text); }
+.check-box.verified { border: 1px solid var(--up); }
+.check-box ul { margin: 4px 0; padding-inline-start: 20px; }
+
 /* Tablet */
 @media (max-width: 1100px) {
   .grid-3 { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }

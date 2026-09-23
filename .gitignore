@@ -25,3 +25,6 @@ market_info/dist/
 
 # market_info local response cache
 market_info/.cache/
+
+# market_info connection check output
+market_info/connection-report.txt

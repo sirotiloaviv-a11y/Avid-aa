@@ -37,7 +37,10 @@ export function quoteFromBars(bars) {
   };
 }
 
-export function createMarketService({ config, fetchImpl = globalThis.fetch, cache = null, now = () => Date.now() }) {
+// `lastCheck` returns the saved result of `npm run check-connection`, if any.
+export function createMarketService({
+  config, fetchImpl = globalThis.fetch, cache = null, now = () => Date.now(), lastCheck = () => null,
+}) {
   const store = cache ?? new MarketCache({ now });
   const avBudget = new RequestBudget({
     name: 'alpha_vantage', perMinute: config.alphaVantage.perMinute, perDay: config.alphaVantage.perDay, cache: store, now,
@@ -227,10 +230,23 @@ export function createMarketService({ config, fetchImpl = globalThis.fetch, cach
       cacheTtl: config.ttl,
       warnings: config.warnings,
       serverTime: now(),
+      lastCheck: summarizeCheck(lastCheck()),
     };
   }
 
   return { resolve, quote, history, assets, status };
+}
+
+function summarizeCheck(report) {
+  if (!report || !Array.isArray(report.providers)) return null;
+  return {
+    ranAt: report.ranAt,
+    overall: report.overall,
+    providers: report.providers.map((p) => ({
+      id: p.id, name: p.name, status: p.status, error: p.error?.message ?? null,
+      contradicted: (p.assumptions ?? []).filter((a) => a.result === 'contradicted').length,
+    })),
+  };
 }
 
 export function toJson(err) {

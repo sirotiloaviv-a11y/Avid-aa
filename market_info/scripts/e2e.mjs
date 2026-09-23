@@ -59,6 +59,15 @@ const base = `http://127.0.0.1:${server.address().port}/`;
 const server2 = createAppServer(dir, { market: unconfigured });
 await new Promise((r) => server2.listen(0, '127.0.0.1', r));
 const base2 = `http://127.0.0.1:${server2.address().port}/`;
+// Keys set, but every provider request fails (simulated disconnect).
+const failing = createMarketService({
+  config: loadConfig({ env: { ...marketEnv, ALPHA_VANTAGE_API_KEY: 'e2e-fake', COINGECKO_DEMO_API_KEY: 'e2e-fake' } }),
+  fetchImpl: async () => { throw new TypeError('fetch failed'); },
+});
+const server3 = createAppServer(dir, { market: failing });
+await new Promise((r) => server3.listen(0, '127.0.0.1', r));
+const base3 = `http://127.0.0.1:${server3.address().port}/`;
+const DEMO_MARKERS = ['ORLN', 'NOVX', 'אורלן', 'נובה', 'ידיעת הדגמה', 'אירוע הדגמה', 'נכס בדיוני'];
 const shots = process.env.SCREENSHOTS;
 if (shots) mkdirSync(shots, { recursive: true });
 
@@ -387,6 +396,50 @@ try {
     expect(upstream.calls.every((c) => c.url.searchParams.get('apikey') !== ''), 'called provider without a key');
   });
 
+  await check('settings says the connection is not verified until a real check passes', async () => {
+    await page.goto(`${base}#/settings`);
+    await page.waitForSelector('#sources [data-check]');
+    expect((await page.getAttribute('#sources [data-check]', 'data-check')) === 'none', 'unexpected check state');
+    expect((await page.textContent('#sources')).includes('החיבור לספקים טרם אומת'), 'not-verified text missing');
+    expect((await page.textContent('#sources')).includes('check-connection'), 'how-to-run missing');
+  });
+
+  await check('all providers failing: clear errors, never demo data', async () => {
+    const p3 = await newPage();
+    await setMode(p3, base3, 'market');
+    await p3.goto(`${base3}#/assets`);
+    await settle(p3);
+    expect(await p3.locator('.row-error:has-text("תקלה בקבלת נתונים")').count() === 4, 'rows not marked as faults');
+    expect(await p3.locator('.asset-price .ltr').count() === 0, 'a price was shown despite failure');
+    await p3.click('[data-watch="AAPL"]');
+    for (const path of ['', 'assets', 'asset/AAPL', 'asset/BTC']) {
+      await p3.goto(`${base3}#/${path}`);
+      await settle(p3);
+      const text = await p3.textContent('body');
+      const leaked = DEMO_MARKERS.filter((m) => text.includes(m));
+      expect(leaked.length === 0, `demo content on #/${path}: ${leaked.join(', ')}`);
+    }
+    await p3.goto(`${base3}#/asset/AAPL`);
+    await settle(p3);
+    expect((await p3.textContent('.state-error')).includes('אין חיבור ל-Alpha Vantage'), 'asset error not explained');
+    expect(await p3.locator('svg .line').count() === 0, 'a chart was drawn despite failure');
+    await p3.goto(base3);
+    await settle(p3);
+    expect(await p3.locator('#chart-area .state-error').count() === 1, 'home chart area shows no error');
+    await snap(p3, '15-market-all-failing');
+  });
+
+  await check('local server unreachable: clear error, never demo data', async () => {
+    const p4 = await newPage();
+    await setMode(p4, base, 'market');
+    await p4.route('**/api/market/**', (r) => r.abort('connectionrefused'));
+    await p4.goto(`${base}#/assets`);
+    await settle(p4);
+    expect((await p4.textContent('.state-error')).includes('השרת המקומי אינו זמין'), 'unreachable server not explained');
+    const text = await p4.textContent('body');
+    expect(!DEMO_MARKERS.some((m) => text.includes(m)), 'demo content shown when server is down');
+  });
+
   await check('market mode on a phone: no horizontal scroll', async () => {
     const phone = await newPage({ width: 390, height: 844 });
     await setMode(phone, base, 'market');
@@ -402,13 +455,14 @@ try {
   await check('no console errors', async () => {
     // 4xx/5xx answers the tests provoke on purpose are logged by the browser
     // as failed resources; those are expected here.
-    const relevant = consoleErrors.filter((e) => !e.includes('favicon') && !/status of (404|503|504|502)/.test(e));
+    const relevant = consoleErrors.filter((e) => !e.includes('favicon') && !/status of (404|503|504|502)/.test(e) && !e.includes('ERR_CONNECTION_REFUSED') && !e.includes('ERR_FAILED'));
     expect(relevant.length === 0, relevant.join(' | '));
   });
 } finally {
   await browser.close();
   server.close();
   server2.close();
+  server3.close();
 }
 
 const failed = results.filter((r) => !r.ok).length;
