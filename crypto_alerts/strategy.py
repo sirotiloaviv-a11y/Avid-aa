@@ -12,6 +12,14 @@ setup:
   swing low (support) and closes back above it with a bullish reaction.
 * SHORT — RSI overbought, a volume spike, and the candle wicks into a prior
   swing high (resistance) and closes back below it with a bearish reaction.
+
+Every signal also lists its *conviction factors* — conditions beyond the
+minimum setup that make it stronger. They are deliberately plain rules, not
+a score, so the alert can say exactly why a trade was marked urgent:
+
+* extreme RSI  — EXTREME_RSI_MARGIN points past the threshold (≤ 20 / ≥ 80)
+* extreme volume — EXTREME_VOLUME_FACTOR × the spike multiplier (≥ 5x)
+* with the trend — a long above the slow EMA, a short below it
 """
 
 from __future__ import annotations
@@ -53,6 +61,7 @@ class Signal:
     reasons: tuple[str, ...]
     # One-line trigger summary, e.g. "RSI oversold + 3.1x Volume Surge + Support bounce".
     summary: str = ""
+    conviction_factors: tuple[str, ...] = ()
     fast_ma: Optional[float] = None
     slow_ma: Optional[float] = None
 
@@ -92,6 +101,23 @@ class RsiVolumeReversalStrategy(Strategy):
 
     def __init__(self, settings: StrategySettings) -> None:
         self.settings = settings
+
+    def _conviction(self, direction: Direction, extreme_rsi: float, vol_ratio: float,
+                    close: float, slow_ma: Optional[float]) -> tuple[str, ...]:
+        s = self.settings
+        factors = []
+        if direction is Direction.LONG and extreme_rsi <= s.rsi_oversold - s.extreme_rsi_margin:
+            factors.append(f"Extreme RSI ({extreme_rsi:.1f})")
+        if direction is Direction.SHORT and extreme_rsi >= s.rsi_overbought + s.extreme_rsi_margin:
+            factors.append(f"Extreme RSI ({extreme_rsi:.1f})")
+        if vol_ratio >= s.volume_spike_multiplier * s.extreme_volume_factor:
+            factors.append(f"Extreme volume ({vol_ratio:.1f}x)")
+        if slow_ma is not None:
+            if direction is Direction.LONG and close > slow_ma:
+                factors.append("With the trend (above slow EMA)")
+            if direction is Direction.SHORT and close < slow_ma:
+                factors.append("With the trend (below slow EMA)")
+        return tuple(factors)
 
     def evaluate(self, symbol: str, timeframe: str, frame: IndicatorFrame) -> Optional[Signal]:
         i = frame.last
@@ -151,6 +177,7 @@ class RsiVolumeReversalStrategy(Strategy):
             volume_ratio=vol_ratio, key_level=support,
             invalidation_level=min(candle.low, support), reasons=reasons,
             summary=f"RSI oversold + {vol_ratio:.1f}x Volume Surge + Support bounce",
+            conviction_factors=self._conviction(Direction.LONG, extreme_rsi, vol_ratio, candle.close, slow_ma),
             fast_ma=frame.fast_ma[i], slow_ma=slow_ma,
         )
 
@@ -184,5 +211,6 @@ class RsiVolumeReversalStrategy(Strategy):
             volume_ratio=vol_ratio, key_level=resistance,
             invalidation_level=max(candle.high, resistance), reasons=reasons,
             summary=f"RSI overbought + {vol_ratio:.1f}x Volume Surge + Resistance rejection",
+            conviction_factors=self._conviction(Direction.SHORT, extreme_rsi, vol_ratio, candle.close, slow_ma),
             fast_ma=frame.fast_ma[i], slow_ma=slow_ma,
         )

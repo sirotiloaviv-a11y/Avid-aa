@@ -18,7 +18,7 @@ import logging
 import random
 import time
 from dataclasses import dataclass
-from typing import Any, AsyncIterator, Iterable, Sequence
+from typing import Any, AsyncIterator, Iterable, Optional, Protocol, Sequence
 
 from .config import ExchangeSettings, parse_timeframe
 
@@ -42,6 +42,30 @@ class Candle:
     def from_ccxt(cls, row: Sequence[Any]) -> "Candle":
         ts, o, h, l, c, v = row[:6]
         return cls(int(ts), float(o), float(h), float(l), float(c), float(v or 0.0))
+
+
+@dataclass(frozen=True)
+class OrderBook:
+    """Order book snapshot. Amounts are in base units, even on contract markets."""
+
+    symbol: str
+    bids: tuple[tuple[float, float], ...]  # (price, amount), best (highest) first
+    asks: tuple[tuple[float, float], ...]  # (price, amount), best (lowest) first
+    timestamp: Optional[int] = None
+
+    @property
+    def mid(self) -> Optional[float]:
+        if not self.bids or not self.asks:
+            return None
+        return (self.bids[0][0] + self.asks[0][0]) / 2
+
+
+class FeedListener(Protocol):
+    """Receives feed health and live prices (the dashboard's runtime state implements it)."""
+
+    def on_feed_state(self, symbol: str, state: str, error: Optional[str] = None) -> None: ...
+
+    def on_tick(self, symbol: str, candle: Candle) -> None: ...
 
 
 class CandleBuffer:
@@ -76,6 +100,10 @@ class CandleBuffer:
         """Closed candles, oldest first (the forming candle is excluded)."""
         ordered = sorted(self._candles)
         return [self._candles[ts] for ts in ordered[:-1]]
+
+    def latest(self) -> Optional[Candle]:
+        """The newest candle, usually still forming — its close is the live price."""
+        return self._candles[max(self._candles)] if self._candles else None
 
     @property
     def last_closed_timestamp(self) -> int | None:
@@ -168,11 +196,32 @@ def create_exchange(settings: ExchangeSettings) -> Any:
 class MarketDataFeed:
     """One exchange connection shared by every monitored symbol."""
 
-    def __init__(self, settings: ExchangeSettings, exchange: Any | None = None) -> None:
+    def __init__(
+        self,
+        settings: ExchangeSettings,
+        exchange: Any | None = None,
+        listener: Optional[FeedListener] = None,
+    ) -> None:
         self.settings = settings
         self._exchange = exchange
         self._timeframe_ms = parse_timeframe(settings.timeframe) * 1000
         self._fatal = _fatal_exception_types()
+        self.listener = listener
+
+    def _notify_state(self, symbol: str, state: str, error: Optional[str] = None) -> None:
+        if self.listener is not None:
+            try:
+                self.listener.on_feed_state(symbol, state, error)
+            except Exception:  # a status display must never break the feed
+                log.exception("feed listener failed")
+
+    def _notify_tick(self, symbol: str, buffer: "CandleBuffer") -> None:
+        latest = buffer.latest()
+        if self.listener is not None and latest is not None:
+            try:
+                self.listener.on_tick(symbol, latest)
+            except Exception:
+                log.exception("feed listener failed")
 
     @property
     def exchange(self) -> Any:
@@ -234,26 +283,34 @@ class MarketDataFeed:
         """Yield the closed-candle history each time a new candle closes on ``symbol``."""
         buffer = CandleBuffer(maxlen=self.settings.history_candles)
         backoff = Backoff()
+        self._notify_state(symbol, "connecting")
         while True:
             try:
                 rows = await self.exchange.fetch_ohlcv(
                     symbol, self.settings.timeframe, limit=self.settings.history_candles + 1
                 )
-                if buffer.load(rows):
+                closed_while_away = buffer.load(rows)
+                self._notify_state(symbol, "live")
+                self._notify_tick(symbol, buffer)
+                if closed_while_away:
                     yield buffer.closed()
                 backoff.reset()
                 while True:
                     rows = await self._next_rows(symbol)
                     backoff.reset()
-                    if buffer.update(rows):
+                    new_close = buffer.update(rows)
+                    self._notify_tick(symbol, buffer)
+                    if new_close:
                         yield buffer.closed()
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
                 if self._fatal and isinstance(exc, self._fatal):
+                    self._notify_state(symbol, "stopped", str(exc))
                     raise FatalFeedError(f"{symbol}: {exc}") from exc
                 delay = backoff.next_delay()
                 reason = "stream stalled" if isinstance(exc, asyncio.TimeoutError) else repr(exc)
+                self._notify_state(symbol, "reconnecting", reason)
                 log.warning("%s feed error (%s); reconnecting in %.1fs", symbol, reason, delay)
                 await asyncio.sleep(delay)
 
@@ -272,9 +329,7 @@ class MarketDataFeed:
         Rounding down keeps the loss at the stop at or below the risk budget.
         Contract markets are converted through their contract size.
         """
-        markets = getattr(self.exchange, "markets", None) or {}
-        market = markets.get(symbol) or {}
-        contract_size = float(market.get("contractSize") or 1.0) if market.get("contract") else 1.0
+        contract_size = self._contract_size(symbol)
         try:
             amount = float(self.exchange.amount_to_precision(symbol, units / contract_size))
         except Exception as exc:
@@ -284,6 +339,29 @@ class MarketDataFeed:
             log.debug("amount_to_precision(%s, %s) failed, using unrounded size: %s", symbol, units, exc)
             return units
         return amount * contract_size
+
+    def _contract_size(self, symbol: str) -> float:
+        markets = getattr(self.exchange, "markets", None) or {}
+        market = markets.get(symbol) or {}
+        return float(market.get("contractSize") or 1.0) if market.get("contract") else 1.0
+
+    async def fetch_order_book(self, symbol: str, limit: Optional[int] = None) -> OrderBook:
+        """Current order book with amounts converted to base units.
+
+        Raises whatever ccxt raises; the caller decides what a missing book means.
+        """
+        raw = await self.exchange.fetch_order_book(symbol, limit)
+        size = self._contract_size(symbol)
+
+        def levels(side: Any) -> tuple[tuple[float, float], ...]:
+            out = []
+            for level in side or ():
+                price, amount = float(level[0]), float(level[1])
+                if price > 0 and amount > 0:
+                    out.append((price, amount * size))
+            return tuple(out)
+
+        return OrderBook(symbol, levels(raw.get("bids")), levels(raw.get("asks")), raw.get("timestamp"))
 
     def is_stale(self, candle: Candle, now_ms: int | None = None) -> bool:
         """True if ``candle`` closed more than one full timeframe ago."""

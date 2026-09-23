@@ -26,7 +26,10 @@ niqqud, and dispatches alerts.
 
 Streams exchange candles over ccxt.pro websockets, runs an RSI + volume +
 support/resistance strategy on each closed candle, sizes the trade so a stop-out
-loses exactly a fixed % of equity, and sends the execution plan to Telegram.
+loses exactly a fixed % of equity, checks order-book depth for slippage, and
+sends the execution plan to Telegram. It sends urgent Pushover and sound alerts
+for high-conviction setups, and has a live dashboard for monitoring and risk
+adjustment.
 
 ```bash
 DRY_RUN=true python -m crypto_alerts

@@ -65,6 +65,9 @@ class FakeExchange:
     async def load_markets(self):
         return self.markets
 
+    async def fetch_order_book(self, symbol, limit=None):
+        return {"bids": [[99.0, 2], [98.0, 0], [97.0, 1]], "asks": [[101.0, 3]], "timestamp": 1}
+
     async def fetch_ohlcv(self, symbol, timeframe, limit=None):
         self.fetch_calls += 1
         return self._history
@@ -143,6 +146,34 @@ class FeedTests(unittest.IsolatedAsyncioTestCase):
         feed = MarketDataFeed(settings(), exchange=exchange)
         # 12.3456 base units = 1.23456 contracts -> 1.234 contracts -> 12.34 base.
         self.assertAlmostEqual(feed.round_amount("X/USDT:USDT", 12.3456), 12.34)
+
+    async def test_order_book_drops_empty_levels(self):
+        feed = MarketDataFeed(settings(), exchange=FakeExchange([], []))
+        book = await feed.fetch_order_book("BTC/USDT", 10)
+        self.assertEqual(book.bids, ((99.0, 2.0), (97.0, 1.0)))
+        self.assertEqual(book.mid, 100.0)
+
+    async def test_order_book_converts_contracts_to_base(self):
+        exchange = FakeExchange([], [])
+        exchange.markets["X/USDT:USDT"] = {"contract": True, "contractSize": 10}
+        book = await MarketDataFeed(settings(), exchange=exchange).fetch_order_book("X/USDT:USDT")
+        self.assertEqual(book.asks, ((101.0, 30.0),))
+
+    async def test_listener_sees_state_changes_and_live_price(self):
+        from crypto_alerts.state import RuntimeState
+
+        state = RuntimeState(["BTC/USDT"])
+        exchange = FakeExchange([[row(1, close=105)], ConnectionError("reset"), [row(1), row(2)]],
+                                [row(0), row(1)])
+        feed = MarketDataFeed(settings(), exchange=exchange, listener=state)
+        stream = feed.stream_closed_candles("BTC/USDT")
+        await asyncio.wait_for(stream.__anext__(), timeout=5)
+        status = state.symbols["BTC/USDT"]
+        self.assertEqual(status.feed_state, "live")
+        self.assertEqual(status.reconnects, 1)
+        self.assertIn("reset", status.last_error)
+        self.assertEqual(status.price, 100.0)  # the new forming candle's close
+        await stream.aclose()
 
     def test_is_stale(self):
         feed = MarketDataFeed(settings(), exchange=FakeExchange([], []))

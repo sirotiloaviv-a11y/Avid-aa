@@ -55,6 +55,26 @@ class LongTriggerTests(unittest.TestCase):
         self.assertIsNone(evaluate(long_setup()[:10]))
 
 
+class ConvictionTests(unittest.TestCase):
+    def test_fixture_has_no_extreme_factors(self):
+        # RSI 24.4 is oversold but not extreme (<= 20); 4x volume is below 2 x 2.5 = 5x.
+        self.assertEqual(evaluate(long_setup()).conviction_factors, ())
+
+    def test_extreme_volume(self):
+        signal = evaluate(long_setup(signal_volume=600.0))
+        self.assertEqual(signal.conviction_factors, ("Extreme volume (6.0x)",))
+
+    def test_extreme_rsi_and_trend_thresholds_are_configurable(self):
+        settings = dataclasses.replace(STRATEGY, extreme_rsi_margin=5.0)
+        factors = evaluate(long_setup(), settings).conviction_factors
+        self.assertEqual(len(factors), 1)
+        self.assertTrue(factors[0].startswith("Extreme RSI"))
+
+    def test_counter_trend_long_gets_no_trend_factor(self):
+        factors = evaluate(long_setup(signal_volume=600.0)).conviction_factors
+        self.assertFalse(any("trend" in f for f in factors))  # fixture closes below the slow EMA
+
+
 class ShortTriggerTests(unittest.TestCase):
     def test_fires_on_mirrored_setup(self):
         signal = evaluate(short_setup())

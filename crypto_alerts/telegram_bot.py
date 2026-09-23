@@ -1,10 +1,9 @@
-"""Alert formatting and delivery to Telegram.
+"""Alert formatting and the Telegram channel.
 
 Formatting is pure (``format_alert`` turns a TradePlan into Telegram HTML) so
-it can be tested and previewed without a bot. Delivery goes through an
-:class:`AlertDispatcher` queue: market tasks enqueue and move on, and a single
-worker sends with retries, so a slow or rate-limited Telegram never stalls the
-market data loops.
+it can be tested and previewed without a bot. Delivery happens in
+:class:`TelegramNotifier`, one of the channels the dispatcher in
+``notifiers.py`` fans alerts out to.
 
 ``python-telegram-bot`` is imported lazily, only when a real bot is created.
 """
@@ -15,9 +14,10 @@ import asyncio
 import html
 import logging
 from datetime import datetime, timezone
-from typing import Any, Optional, Protocol
+from typing import Any, Optional
 
 from .config import Settings
+from .notifiers import Notification
 from .risk_manager import TradePlan
 from .strategy import Direction
 
@@ -66,7 +66,45 @@ def _utc(ts_ms: int) -> str:
     return datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
 
-def format_alert(plan: TradePlan, timeframe_ms: Optional[int] = None) -> str:
+def _liquidity_lines(plan: TradePlan) -> list[str]:
+    """The 💧 section: expected slippage and what the guard did about it."""
+    e = html.escape
+    liq = plan.liquidity
+    if plan.liquidity_error:
+        return [f"💧 ⚠️ <i>Order book unavailable ({e(plan.liquidity_error)}) — slippage unknown</i>"]
+    if liq is None:
+        return []
+    base = e(_base_asset(plan.symbol))
+    detail = f"spread {liq.spread_pct:.3f}% · limit {liq.threshold_pct:g}%"
+    if plan.liquidity_action == "ok":
+        return [f"💧 <b>Liquidity:</b> ✅ ~{liq.slippage_pct:.3f}% slippage for full size <i>({detail})</i>"]
+    lines = []
+    if plan.liquidity_action == "reduced" and plan.original_units is not None:
+        lines.append(
+            f"💧 <b>Liquidity:</b> 📉 size reduced from {format_units(plan.original_units)} {base} "
+            f"to fit {liq.threshold_pct:g}% slippage — ~{liq.slippage_pct:.3f}% now <i>({detail})</i>"
+        )
+        return lines
+    if not liq.fully_filled:
+        lines.append(
+            f"💧 ⚠️ <b>THIN BOOK:</b> visible depth fills only {format_units(liq.filled_units)} of "
+            f"{format_units(liq.units)} {base} <i>({detail})</i>"
+        )
+    else:
+        lines.append(
+            f"💧 ⚠️ <b>THIN BOOK:</b> expected slippage {liq.slippage_pct:.3f}% &gt; {liq.threshold_pct:g}% "
+            f"<i>({detail})</i>"
+        )
+    lines.append(
+        f"      <i>max size within limit ≈ {format_units(liq.max_units_within_threshold)} {base} "
+        f"({format_usd(liq.max_units_within_threshold * plan.entry)}) — use limit orders or scale in</i>"
+    )
+    if plan.risk_with_slippage is not None:
+        lines.append(f"      <i>loss at SL incl. slippage ≈ {format_usd(plan.risk_with_slippage)}</i>")
+    return lines
+
+
+def format_alert(plan: TradePlan, timeframe_ms: Optional[int] = None, urgent: bool = False) -> str:
     """Render a trade plan as a Telegram HTML message."""
     sig = plan.signal
     e = html.escape
@@ -79,7 +117,10 @@ def format_alert(plan: TradePlan, timeframe_ms: Optional[int] = None) -> str:
     )
     base = e(_base_asset(sig.symbol))
 
-    lines = [
+    lines = []
+    if urgent:
+        lines.append("🚨🔥 <b>HIGH CONVICTION</b> 🔥🚨")
+    lines += [
         f"{header} · <b>{e(sig.symbol)}</b> · {e(sig.timeframe)}",
         f"⚡ <i>{e(sig.summary or sig.strategy)}</i>",
         "",
@@ -100,9 +141,15 @@ def format_alert(plan: TradePlan, timeframe_ms: Optional[int] = None) -> str:
         lines.append(
             f"⚠️ <i>Size capped by MAX_LEVERAGE — risking less than the {format_usd(plan.risk_budget)} budget</i>"
         )
+    liquidity = _liquidity_lines(plan)
+    if liquidity:
+        lines += [""] + liquidity
 
     lines += ["", "📊 <b>Trigger Reasons</b>"]
     lines += [f"• {e(reason)}" for reason in sig.reasons]
+    if sig.conviction_factors:
+        lines += ["", "🔥 <b>Conviction</b>"]
+        lines += [f"• {e(factor)}" for factor in sig.conviction_factors]
 
     atr_text = format_price(sig.atr) if sig.atr >= 1 else f"{sig.atr:.4g}"
     context = [f"RSI {sig.rsi:.1f}", f"ATR {atr_text}"]
@@ -119,8 +166,38 @@ def format_alert(plan: TradePlan, timeframe_ms: Optional[int] = None) -> str:
     return "\n".join(lines)[:MAX_MESSAGE_LENGTH]
 
 
-def format_startup(settings: Settings, symbols: list[str], streaming: bool) -> str:
-    ex, risk = settings.exchange, settings.risk
+def format_push(plan: TradePlan) -> str:
+    """Compact alert for push channels (Pushover allows 1024 chars and a small HTML subset)."""
+    sig = plan.signal
+    e = html.escape
+    zone_low, zone_high = plan.entry_zone
+    lines = [
+        f"<b>Entry</b> {format_price(zone_low)} – {format_price(zone_high)}",
+        f"<b>SL</b> {format_price(plan.stop_loss)} ({format_pct(plan.stop_loss_pct)}) · "
+        f"<b>TP</b> {format_price(plan.take_profit)} ({format_pct(plan.take_profit_pct)})",
+        f"<b>Size</b> {format_usd(plan.notional)} = {format_units(plan.units)} {e(_base_asset(sig.symbol))}",
+        f"<b>Risk</b> {format_usd(plan.risk_amount)} · R:R 1:{plan.risk_reward_ratio:g}",
+        e(sig.summary),
+    ]
+    if sig.conviction_factors:
+        lines.append("🔥 " + e(", ".join(sig.conviction_factors)))
+    if plan.liquidity_action == "warned":
+        lines.append("⚠️ Thin order book — expect slippage")
+    elif plan.liquidity_action == "reduced":
+        lines.append("📉 Size reduced for liquidity")
+    return "\n".join(lines)
+
+
+def alert_title(plan: TradePlan, urgent: bool) -> str:
+    direction = "🟢 LONG" if plan.direction is Direction.LONG else "🔴 SHORT"
+    return f"{'🚨 ' if urgent else ''}{direction} {plan.symbol} {plan.signal.timeframe}"
+
+
+def format_startup(settings: Settings, symbols: list[str], streaming: bool, channels: list[str]) -> str:
+    ex, risk, liq = settings.exchange, settings.risk, settings.liquidity
+    liquidity = (
+        f"on — max slippage {liq.max_slippage_pct:g}%, action: {html.escape(liq.action)}" if liq.enabled else "off"
+    )
     return "\n".join(
         [
             "🤖 <b>Crypto alert system online</b>",
@@ -129,37 +206,44 @@ def format_startup(settings: Settings, symbols: list[str], streaming: bool) -> s
             f"Watching: {html.escape(', '.join(symbols)) or '—'}",
             f"Risk/trade: {format_usd(risk.risk_budget)} ({risk.risk_per_trade_pct:g}% of {format_usd(risk.account_equity)})",
             f"Target R:R: 1 : {risk.risk_reward_ratio:g} · Stops: {html.escape(risk.stop_mode)}",
+            f"Liquidity guard: {liquidity}",
+            f"Channels: {html.escape(', '.join(channels))}",
         ]
     )
 
 
-# ----------------------------------------------------------------- delivery
+def format_risk_change(old_equity: float, old_pct: float, new_equity: float, new_pct: float, source: str) -> str:
+    return "\n".join(
+        [
+            f"⚙️ <b>Risk settings changed</b> <i>({html.escape(source)})</i>",
+            f"Equity: {format_usd(old_equity)} → <b>{format_usd(new_equity)}</b>",
+            f"Risk/trade: {old_pct:g}% → <b>{new_pct:g}%</b> "
+            f"(= {format_usd(new_equity * new_pct / 100)} per trade)",
+        ]
+    )
 
 
-class Notifier(Protocol):
-    async def send(self, text: str) -> bool: ...
-
-
-class ConsoleNotifier:
-    """Prints alerts instead of sending them (DRY_RUN=true)."""
-
-    async def send(self, text: str) -> bool:
-        print(f"\n{'=' * 60}\n{text}\n{'=' * 60}", flush=True)
-        return True
+# ------------------------------------------------------------------ delivery
 
 
 class TelegramNotifier:
-    """Sends HTML messages to one chat, retrying transient failures."""
+    """Sends HTML messages to the main chat, and urgent ones to an optional urgent chat."""
+
+    name = "telegram"
 
     def __init__(
         self,
         token: str,
         chat_id: str,
         *,
+        urgent_chat_id: str = "",
+        quiet_normal_alerts: bool = False,
         max_attempts: int = 5,
         bot: Any | None = None,
     ) -> None:
         self.chat_id = chat_id
+        self.urgent_chat_id = urgent_chat_id
+        self.quiet_normal_alerts = quiet_normal_alerts
         self.max_attempts = max_attempts
         self._token = token
         self._bot = bot
@@ -176,16 +260,29 @@ class TelegramNotifier:
             self._bot = Bot(token=self._token)
         return self._bot
 
-    async def send(self, text: str) -> bool:
+    def accepts(self, notification: Notification) -> bool:
+        return True
+
+    async def send(self, notification: Notification) -> bool:
+        """Deliver to the main chat (and the urgent chat for urgent alerts)."""
+        silent = self.quiet_normal_alerts and not notification.urgent and notification.kind == "alert"
+        targets = [self.send_text(self.chat_id, notification.text, silent=silent)]
+        if notification.urgent and self.urgent_chat_id and self.urgent_chat_id != self.chat_id:
+            targets.append(self.send_text(self.urgent_chat_id, notification.text))
+        results = await asyncio.gather(*targets)
+        return all(results)
+
+    async def send_text(self, chat_id: str, text: str, *, silent: bool = False) -> bool:
         """Send ``text``; returns False if it could not be delivered after retrying."""
         delay = 1.0
         for attempt in range(1, self.max_attempts + 1):
             try:
                 await self.bot.send_message(
-                    chat_id=self.chat_id,
+                    chat_id=chat_id,
                     text=text,
                     parse_mode="HTML",
                     disable_web_page_preview=True,
+                    disable_notification=silent,
                 )
                 return True
             except asyncio.CancelledError:
@@ -214,50 +311,3 @@ class TelegramNotifier:
                 await self._bot.shutdown()
             except Exception as exc:
                 log.debug("bot.shutdown() failed: %s", exc)
-
-
-class AlertDispatcher:
-    """Queue in front of a notifier so senders never block on the network."""
-
-    def __init__(self, notifier: Notifier, maxsize: int = 200) -> None:
-        self.notifier = notifier
-        self._queue: asyncio.Queue[str] = asyncio.Queue(maxsize=maxsize)
-        self.sent = 0
-        self.failed = 0
-
-    def enqueue(self, text: str) -> None:
-        try:
-            self._queue.put_nowait(text)
-        except asyncio.QueueFull:
-            log.error("Alert queue full — dropping alert: %s", text.splitlines()[0] if text else "")
-
-    async def run(self) -> None:
-        """Worker loop: deliver queued messages until cancelled."""
-        while True:
-            text = await self._queue.get()
-            try:
-                ok = await self.notifier.send(text)
-                if ok:
-                    self.sent += 1
-                else:
-                    self.failed += 1
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                self.failed += 1
-                log.exception("Notifier raised while sending an alert")
-            finally:
-                self._queue.task_done()
-
-    async def drain(self, timeout: float = 10.0) -> None:
-        """Wait (bounded) for queued alerts to go out, e.g. before shutdown."""
-        try:
-            await asyncio.wait_for(self._queue.join(), timeout)
-        except asyncio.TimeoutError:
-            log.warning("Shutdown with %d alert(s) still queued", self._queue.qsize())
-
-
-def create_notifier(settings: Settings) -> Notifier:
-    if settings.telegram.dry_run:
-        return ConsoleNotifier()
-    return TelegramNotifier(settings.telegram.bot_token, settings.telegram.chat_id)

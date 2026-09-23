@@ -50,3 +50,14 @@ def short_setup() -> list[Candle]:
 def as_rows(candles: list[Candle]) -> list[list[float]]:
     """Candles in ccxt's [ts, o, h, l, c, v] row format."""
     return [[c.timestamp, c.open, c.high, c.low, c.close, c.volume] for c in candles]
+
+
+def make_book(mid: float, depth_units: float, spread_pct: float = 0.01, levels: int = 20,
+              step_pct: float = 0.01, symbol: str = "BTC/USDT"):
+    """Symmetric order book: ``levels`` evenly sized levels per side, ``step_pct`` apart."""
+    from crypto_alerts.market_data import OrderBook
+
+    half, step, amount = mid * spread_pct / 200, mid * step_pct / 100, depth_units / levels
+    asks = tuple((mid + half + k * step, amount) for k in range(levels))
+    bids = tuple((mid - half - k * step, amount) for k in range(levels))
+    return OrderBook(symbol, bids, asks)

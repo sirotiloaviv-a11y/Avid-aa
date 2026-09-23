@@ -16,6 +16,8 @@ from typing import Mapping
 BASE_DIR = Path(__file__).resolve().parent
 
 STOP_MODES = ("atr", "swing", "hybrid")
+LIQUIDITY_ACTIONS = ("warn", "reduce", "filter")
+LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "::1")
 MARKET_TYPES = ("spot", "swap", "future", "margin")
 
 
@@ -173,6 +175,10 @@ class StrategySettings:
     sr_tolerance_atr: float = 0.5
     # When true, longs need close > slow MA and shorts close < slow MA.
     trend_filter: bool = False
+    # Conviction factors (see strategy.py): RSI this many points beyond the
+    # threshold, and volume this many times the spike multiplier.
+    extreme_rsi_margin: float = 10.0
+    extreme_volume_factor: float = 2.0
 
 
 @dataclass(frozen=True)
@@ -202,12 +208,63 @@ class RiskSettings:
 
 
 @dataclass(frozen=True)
+class LiquiditySettings:
+    enabled: bool = True
+    # warn   — send the alert with a slippage warning
+    # reduce — shrink the size to what the book absorbs within the threshold
+    # filter — drop the alert
+    action: str = "warn"
+    # Expected fill vs mid price, in percent. 0.1 means 0.1%.
+    max_slippage_pct: float = 0.1
+    # Order book levels fetched per side at alert time.
+    depth_limit: int = 100
+
+
+@dataclass(frozen=True)
+class UrgentSettings:
+    enabled: bool = True
+    # An alert is urgent (high conviction) when it has at least this many
+    # conviction factors and the liquidity check passed.
+    min_factors: int = 2
+    # Pushover (https://pushover.net). Both token and user key are needed.
+    pushover_token: str = field(default="", repr=False)
+    pushover_user: str = field(default="", repr=False)
+    # -2 lowest ... 1 high (bypasses quiet hours) ... 2 emergency (repeats until acknowledged)
+    pushover_priority: int = 1
+    pushover_sound: str = "cashregister"
+    pushover_urgent_only: bool = True
+    # Local sound, e.g. "afplay /System/Library/Sounds/Glass.aiff" or
+    # "paplay /usr/share/sounds/freedesktop/stereo/alarm-clock-elapsed.oga".
+    # Empty = no local sound.
+    sound_command: str = ""
+    sound_urgent_only: bool = True
+
+    @property
+    def pushover_enabled(self) -> bool:
+        return bool(self.pushover_token and self.pushover_user)
+
+
+@dataclass(frozen=True)
+class DashboardSettings:
+    enabled: bool = True
+    host: str = "127.0.0.1"
+    port: int = 8765
+    # Required when host is not loopback. Open /?token=... once to log in.
+    token: str = field(default="", repr=False)
+
+
+@dataclass(frozen=True)
 class TelegramSettings:
     bot_token: str = field(default="", repr=False)
     chat_id: str = ""
     # Print alerts to stdout instead of sending them. Useful for a first run.
     dry_run: bool = False
     send_startup_message: bool = True
+    # A second chat that receives only urgent alerts. Give it its own
+    # notification sound in the Telegram app — bots cannot choose sounds.
+    urgent_chat_id: str = ""
+    # Deliver normal alerts silently so only urgent ones make a sound.
+    quiet_normal_alerts: bool = False
 
 
 @dataclass(frozen=True)
@@ -217,6 +274,9 @@ class Settings:
     strategy: StrategySettings = field(default_factory=StrategySettings)
     risk: RiskSettings = field(default_factory=RiskSettings)
     telegram: TelegramSettings = field(default_factory=TelegramSettings)
+    liquidity: LiquiditySettings = field(default_factory=LiquiditySettings)
+    urgent: UrgentSettings = field(default_factory=UrgentSettings)
+    dashboard: DashboardSettings = field(default_factory=DashboardSettings)
     # Suppress repeat alerts for the same symbol and direction for this long.
     alert_cooldown_minutes: float = 60.0
     log_level: str = "INFO"
@@ -263,6 +323,8 @@ class Settings:
             sr_lookback=env.int("SR_LOOKBACK", 100, ge=10),
             sr_tolerance_atr=env.float("SR_TOLERANCE_ATR", 0.5, gt=0),
             trend_filter=env.bool("TREND_FILTER", False),
+            extreme_rsi_margin=env.float("EXTREME_RSI_MARGIN", 10.0, ge=0),
+            extreme_volume_factor=env.float("EXTREME_VOLUME_FACTOR", 2.0, ge=1),
         )
         risk = RiskSettings(
             account_equity=env.float("ACCOUNT_EQUITY", 1_000_000.0, gt=0),
@@ -282,6 +344,31 @@ class Settings:
             chat_id=env.str("TELEGRAM_CHAT_ID"),
             dry_run=env.bool("DRY_RUN", False),
             send_startup_message=env.bool("SEND_STARTUP_MESSAGE", True),
+            urgent_chat_id=env.str("TELEGRAM_URGENT_CHAT_ID"),
+            quiet_normal_alerts=env.bool("TELEGRAM_QUIET_NORMAL_ALERTS", False),
+        )
+        liquidity = LiquiditySettings(
+            enabled=env.bool("LIQUIDITY_CHECK", True),
+            action=env.choice("LIQUIDITY_ACTION", "warn", LIQUIDITY_ACTIONS),
+            max_slippage_pct=env.float("MAX_SLIPPAGE_PCT", 0.1, gt=0, le=10),
+            depth_limit=env.int("ORDER_BOOK_DEPTH", 100, ge=5),
+        )
+        urgent = UrgentSettings(
+            enabled=env.bool("URGENT_ALERTS", True),
+            min_factors=env.int("URGENT_MIN_FACTORS", 2, ge=1),
+            pushover_token=env.str("PUSHOVER_APP_TOKEN"),
+            pushover_user=env.str("PUSHOVER_USER_KEY"),
+            pushover_priority=env.int("PUSHOVER_PRIORITY", 1, ge=-2),
+            pushover_sound=env.str("PUSHOVER_SOUND", "cashregister"),
+            pushover_urgent_only=env.bool("PUSHOVER_URGENT_ONLY", True),
+            sound_command=env.str("SOUND_COMMAND"),
+            sound_urgent_only=env.bool("SOUND_URGENT_ONLY", True),
+        )
+        dashboard = DashboardSettings(
+            enabled=env.bool("DASHBOARD_ENABLED", True),
+            host=env.str("DASHBOARD_HOST", "127.0.0.1"),
+            port=env.int("DASHBOARD_PORT", 8765, ge=0),
+            token=env.str("DASHBOARD_TOKEN"),
         )
         settings = cls(
             exchange=exchange,
@@ -289,6 +376,9 @@ class Settings:
             strategy=strategy,
             risk=risk,
             telegram=telegram,
+            liquidity=liquidity,
+            urgent=urgent,
+            dashboard=dashboard,
             alert_cooldown_minutes=env.float("ALERT_COOLDOWN_MINUTES", 60.0, ge=0),
             log_level=env.str("LOG_LEVEL", "INFO").upper(),
         )
@@ -326,6 +416,19 @@ class Settings:
             parse_timeframe(self.exchange.timeframe)
         except ValueError as exc:
             errors.append(str(exc))
+        u = self.urgent
+        if bool(u.pushover_token) != bool(u.pushover_user):
+            errors.append("PUSHOVER_APP_TOKEN and PUSHOVER_USER_KEY must be set together")
+        if u.pushover_priority > 2:
+            errors.append(f"PUSHOVER_PRIORITY={u.pushover_priority} must be between -2 and 2")
+        d = self.dashboard
+        if d.enabled and d.host not in LOOPBACK_HOSTS and not d.token:
+            errors.append(
+                f"DASHBOARD_HOST={d.host} exposes a page that can change position sizing; "
+                "set DASHBOARD_TOKEN or bind to 127.0.0.1"
+            )
+        if d.port > 65535:
+            errors.append(f"DASHBOARD_PORT={d.port} is not a valid port")
         return errors
 
     def min_history(self) -> int:
