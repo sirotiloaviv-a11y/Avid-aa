@@ -1,0 +1,26 @@
+name: crypto-alerts
+
+on:
+  push:
+    branches: [main]
+    paths: ["crypto_alerts/**", ".github/workflows/crypto-alerts.yml"]
+  pull_request:
+    paths: ["crypto_alerts/**", ".github/workflows/crypto-alerts.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      # The suite stubs ccxt and Telegram, so it needs no installs.
+      - name: Run the test suite
+        run: python -m unittest discover -s crypto_alerts/tests -t . -v

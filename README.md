@@ -1,6 +1,6 @@
 # Avid-aa
 
-Two independent security projects.
+Independent projects.
 
 ## [`moat/`](moat/README.md) — security scanner for AI agent configuration
 
@@ -21,3 +21,13 @@ No dependencies. Emits SARIF for GitHub code scanning.
 Monitors Hebrew-language news and Telegram sources for security events, matches
 them against a keyword ruleset that handles Hebrew prefixes, suffixes and
 niqqud, and dispatches alerts.
+
+## [`crypto_alerts/`](crypto_alerts/README.md) — real-time crypto trading alerts
+
+Streams exchange candles over ccxt.pro websockets, runs an RSI + volume +
+support/resistance strategy on each closed candle, sizes the trade so a stop-out
+loses exactly a fixed % of equity, and sends the execution plan to Telegram.
+
+```bash
+DRY_RUN=true python -m crypto_alerts
+```
