@@ -1,6 +1,6 @@
 # Avid-aa
 
-Two independent security projects.
+Independent projects.
 
 ## [`moat/`](moat/README.md) — security scanner for AI agent configuration
 
@@ -21,3 +21,15 @@ No dependencies. Emits SARIF for GitHub code scanning.
 Monitors Hebrew-language news and Telegram sources for security events, matches
 them against a keyword ruleset that handles Hebrew prefixes, suffixes and
 niqqud, and dispatches alerts.
+
+## [`market_info/`](market_info/README.md) — stock and crypto information prototype (Hebrew)
+
+A local, demo-data-only prototype of a market information dashboard: watchlist,
+charts, news, event calendar and factual information alerts, in right-to-left
+Hebrew. No live data, no trading account, no recommendations.
+
+```bash
+cd market_info && npm start   # http://localhost:5173
+```
+
+No dependencies. [Full documentation →](market_info/README.md)

@@ -19,3 +19,6 @@ venv/
 *.egg-info/
 moat.sarif
 .moat-baseline.json
+
+# market_info build output
+market_info/dist/

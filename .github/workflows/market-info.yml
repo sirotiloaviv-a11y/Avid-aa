@@ -1,0 +1,25 @@
+name: market-info
+
+on:
+  push:
+    branches: [main]
+    paths: ["market_info/**", ".github/workflows/market-info.yml"]
+  pull_request:
+    paths: ["market_info/**", ".github/workflows/market-info.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: market_info
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm test
+      - run: npm run build
