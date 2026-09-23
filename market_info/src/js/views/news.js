@@ -1,9 +1,13 @@
 import { esc, qs } from '../dom.js';
-import { loadInto, newsCard, emptyView } from '../ui/components.js';
+import { loadInto, newsCard, emptyView, notConnectedView } from '../ui/components.js';
 import { filterNews } from '../data/filters.js';
 import { tzLabel } from '../format.js';
 
 export async function render(root, ctx) {
+  if (!ctx.provider.capabilities.news) {
+    root.innerHTML = `<div class="page-head"><h1>חדשות</h1></div>${notConnectedView('חדשות')}`;
+    return;
+  }
   const tz = ctx.tz();
   let symbol = ctx.query.symbol ?? '';
   let category = ctx.query.category ?? '';

@@ -1,5 +1,5 @@
 import { esc, qs } from '../dom.js';
-import { loadInto, eventRow, emptyView } from '../ui/components.js';
+import { loadInto, eventRow, emptyView, notConnectedView } from '../ui/components.js';
 import {
   dateKey, addDays, weekKeys, isValidDateKey, formatDayKey, formatWeekdayShort, formatDateTime, tzLabel,
 } from '../format.js';
@@ -11,6 +11,10 @@ export function groupEventsByDay(events, tz) {
 }
 
 export async function render(root, ctx) {
+  if (!ctx.provider.capabilities.events) {
+    root.innerHTML = `<div class="page-head"><h1>לוח אירועים</h1></div>${notConnectedView('אירועים')}`;
+    return;
+  }
   const tz = ctx.tz();
   const todayKey = dateKey(Date.now(), tz);
   let view = ctx.query.view === 'week' ? 'week' : 'day';

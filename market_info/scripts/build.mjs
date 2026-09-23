@@ -30,6 +30,13 @@ const SECRET_PATTERNS = [
 
 const errors = [];
 const files = await walk(src);
+for (const file of [join(root, 'server.mjs'), ...(await walk(join(root, 'server')))].filter((f) => f.endsWith('.mjs'))) {
+  try {
+    execFileSync(process.execPath, ['--check', file], { stdio: 'pipe' });
+  } catch (err) {
+    errors.push(`${relative(root, file)}: syntax error\n${err.stderr}`);
+  }
+}
 for (const file of files.filter((f) => f.endsWith('.js'))) {
   const rel = relative(root, file);
   try {

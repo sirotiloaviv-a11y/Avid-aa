@@ -4,6 +4,10 @@ import { createServer } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { extname, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { loadConfig } from './server/config.mjs';
+import { MarketCache } from './server/cache.mjs';
+import { createMarketService } from './server/marketService.mjs';
+import { handleApi } from './server/api.mjs';
 
 const TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -21,10 +25,18 @@ const root = resolve(here, process.argv[2] ?? 'src');
 const port = Number(process.env.PORT ?? 5173);
 const host = process.env.HOST ?? '127.0.0.1';
 
-export function createAppServer(dir = root) {
+// Market data keys are read here, on the server, and never sent to the page.
+export function createDefaultMarketService() {
+  const config = loadConfig({ envFile: join(here, '.env') });
+  const cache = new MarketCache({ file: join(here, '.cache', 'market-cache.json') });
+  return { config, service: createMarketService({ config, cache }) };
+}
+
+export function createAppServer(dir = root, { market = null } = {}) {
   return createServer(async (req, res) => {
     try {
       const url = new URL(req.url, 'http://localhost');
+      if (await handleApi(req, res, url, market)) return;
       let path = normalize(decodeURIComponent(url.pathname)).replace(/^([/\\])+/, '');
       if (path === '' || path.endsWith(sep)) path = join(path, 'index.html');
       const file = resolve(dir, path);
@@ -50,9 +62,13 @@ export function createAppServer(dir = root) {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  createAppServer().listen(port, host, () => {
-    console.log(`מרכז מידע שוק (הדגמה) פועל: http://localhost:${port}`);
+  const { config, service } = createDefaultMarketService();
+  createAppServer(root, { market: service }).listen(port, host, () => {
+    console.log(`מרכז מידע שוק פועל: http://localhost:${port}`);
     console.log(`מגיש קבצים מתוך: ${root}`);
+    console.log(`מפתח מניות (Alpha Vantage): ${config.alphaVantage.apiKey ? 'הוגדר' : 'לא הוגדר — מצב נתוני שוק יציג "נדרשת הגדרה"'}`);
+    console.log(`מפתח קריפטו (CoinGecko): ${config.coinGecko.apiKey ? 'הוגדר' : 'לא הוגדר — מצב נתוני שוק יציג "נדרשת הגדרה"'}`);
+    config.warnings.forEach((w) => console.log(`אזהרה: ${w}`));
     console.log('לעצירה: Ctrl+C');
   }).on('error', (err) => {
     if (err.code === 'EADDRINUSE') {

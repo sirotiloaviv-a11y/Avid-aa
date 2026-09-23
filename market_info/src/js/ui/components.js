@@ -15,17 +15,41 @@ export const ASSET_TYPE_LABELS = { stock: 'מניה', crypto: 'קריפטו' };
 export const VOLUME_DISCLAIMER =
   'נתון סטטיסטי בלבד: הנפח גבוה מהממוצע. אין בו מידע על זהות הקונים או המוכרים, על כוונותיהם או על כיוון המחיר בהמשך.';
 
-export function loadingView(label = 'טוען נתוני הדגמה…') {
+export function loadingView(label = 'טוען נתונים…') {
   return `<div class="state state-loading" role="status" aria-live="polite">
     <span class="spinner" aria-hidden="true"></span><span>${esc(label)}</span>
     <div class="skeleton"></div><div class="skeleton short"></div></div>`;
 }
 
+// Error titles distinguish "needs setup", quota limits and real faults.
+const ERROR_TITLES = {
+  not_configured: 'נדרשת הגדרה',
+  rate_limited: 'מגבלת בקשות של ספק הנתונים',
+  auth_failed: 'המפתח נדחה על ידי הספק',
+  premium_required: 'הנתון דורש מסלול בתשלום',
+  server_unreachable: 'השרת המקומי אינו זמין',
+  network: 'תקלה בקבלת נתונים',
+  upstream_unavailable: 'תקלה בקבלת נתונים',
+  bad_response: 'תקלה בקבלת נתונים',
+};
+
 export function errorView(error) {
-  return `<div class="state state-error" role="alert">
-    <strong>לא ניתן היה לטעון את הנתונים.</strong>
+  const code = error?.code;
+  const title = ERROR_TITLES[code] ?? 'לא ניתן היה לטעון את הנתונים.';
+  const setup = code === 'not_configured' || code === 'auth_failed'
+    ? '<a class="btn btn-outline" href="#/settings">הוראות הגדרה</a>' : '';
+  return `<div class="state ${code === 'not_configured' ? 'state-setup' : 'state-error'}" role="alert" data-error-code="${esc(code ?? '')}">
+    <strong>${esc(title)}</strong>
     <span>${esc(error?.message ?? 'שגיאה לא ידועה')}</span>
-    <button type="button" class="btn" data-retry>נסה שוב</button></div>`;
+    <span class="row-actions"><button type="button" class="btn" data-retry>נסה שוב</button>${setup}</span></div>`;
+}
+
+// Shown in market mode for content that has no real source yet.
+export function notConnectedView(what) {
+  return `<div class="state state-empty" data-not-connected>
+    <strong>טרם חובר</strong>
+    <span>${esc(what)} אינם מחוברים עדיין למקור אמיתי במצב נתוני שוק. לא מוצג תוכן מומצא.</span>
+    <span class="muted small">תוכן לדוגמה זמין במצב הדגמה (הגדרות ← מצב נתונים).</span></div>`;
 }
 
 export function emptyView(title, hint = '') {
@@ -51,7 +75,48 @@ export function demoTag(text = 'הדגמה') {
 }
 
 export function changeBadge(asset) {
+  if (asset.changePct === null || asset.changePct === undefined) return '<span class="change flat">—</span>';
   return `<span class="change ${trendClass(asset.changePct)}">${ltr(formatPct(asset.changePct))}</span>`;
+}
+
+export const DELAY_SHORT = { end_of_day: 'סוף יום', delayed: 'מושהה', realtime: 'זמן אמת' };
+
+export const MARKET_REASON_LABELS = {
+  weekend: 'סוף שבוע',
+  pre_open: 'לפני פתיחת המסחר',
+  after_close: 'אחרי סגירת המסחר',
+  regular_hours: 'שעות מסחר רגילות',
+  continuous: 'מסחר רציף 24/7',
+};
+
+// Source, data time and delay for one market datum, plus stale / partial
+// flags. Returns '' for demo data, which is labeled elsewhere.
+export function dataMeta(meta, tz, { compact = false } = {}) {
+  if (!meta) return '';
+  const when = meta.asOf ? formatDateTime(meta.asOf, tz) : 'לא ידוע';
+  const flags = [];
+  if (meta.stale) {
+    flags.push(`<span class="tag tag-stale">${meta.staleReason === 'fetch_failed'
+      ? 'נתון ישן — העדכון האחרון נכשל' : 'נתון ישן'}</span>`);
+  }
+  if (meta.partial && meta.changeBasis === 'previous_close') flags.push('<span class="tag tag-warn">יום מסחר נוכחי — נתון חלקי</span>');
+  const fetched = meta.fetchedAt ? `עודכן לאחרונה מהספק: ${esc(formatDateTime(meta.fetchedAt, tz))}` : '';
+  if (compact) {
+    return `<span class="data-meta small">${esc(meta.source.name)} · ${esc(DELAY_SHORT[meta.delay] ?? meta.delay)} · ${esc(when)} ${flags.join('')}</span>`;
+  }
+  return `<div class="data-meta small">
+    <span>מקור: <strong>${esc(meta.source.name)}</strong></span>
+    <span>מועד הנתון: ${esc(when)}</span>
+    <span>השהיה ידועה: ${esc(meta.delayLabel)}</span>
+    ${fetched ? `<span>${fetched}</span>` : ''}
+    ${flags.join('')}
+    ${meta.warning ? `<span class="warn-text">${esc(meta.warning)}</span>` : ''}
+    ${meta.source.attribution ? `<span class="attribution">${esc(meta.source.attribution)}</span>` : ''}
+  </div>`;
+}
+
+export function rowError(error) {
+  return `<span class="row-error" data-error-code="${esc(error.code)}">${esc(ERROR_TITLES[error.code] ?? 'שגיאה')}</span>`;
 }
 
 export function watchButton(symbol, watched, { compact = false } = {}) {
@@ -60,11 +125,14 @@ export function watchButton(symbol, watched, { compact = false } = {}) {
     data-watch="${esc(symbol)}" aria-pressed="${watched}" aria-label="${esc(label)} ${esc(symbol)}">${watched ? '★ ' : '☆ '}${label}</button>`;
 }
 
-export function assetRow(asset, { watched, selectable = false, selected = false } = {}) {
-  const main = `<span class="asset-id">${ltr(asset.symbol, 'symbol')}<span class="asset-name">${esc(asset.name)}</span></span>
+export function assetRow(asset, { watched, selectable = false, selected = false, tz = 'UTC' } = {}) {
+  const priced = typeof asset.price === 'number';
+  const main = `<span class="asset-id">${ltr(asset.displaySymbol ?? asset.symbol, 'symbol')}<span class="asset-name">${esc(asset.name)}</span></span>
     <span class="asset-type">${esc(ASSET_TYPE_LABELS[asset.type])}</span>
-    <span class="asset-price">${ltr(formatPrice(asset.price, asset.currency), 'num')}</span>
-    ${changeBadge(asset)}`;
+    <span class="asset-price">${priced ? ltr(formatPrice(asset.price, asset.currency), 'num') : rowError(asset.error ?? { code: 'unknown' })}</span>
+    ${priced ? changeBadge(asset) : '<span></span>'}
+    ${asset.meta ? `<span class="asset-meta">${dataMeta(asset.meta, tz, { compact: true })}</span>` : ''}
+    ${!priced && asset.error ? `<span class="asset-meta small muted">${esc(asset.error.message)}</span>` : ''}`;
   const opener = selectable
     ? `<button type="button" class="asset-main" data-select="${esc(asset.symbol)}" aria-pressed="${selected}">${main}</button>`
     : `<a class="asset-main" href="#/asset/${esc(asset.symbol)}">${main}</a>`;

@@ -1,9 +1,13 @@
 import { esc, qs } from '../dom.js';
-import { loadInto, alertCard, emptyView, ALERT_TYPE_LABELS } from '../ui/components.js';
+import { loadInto, alertCard, emptyView, ALERT_TYPE_LABELS, notConnectedView } from '../ui/components.js';
 import { filterAlerts } from '../data/filters.js';
 import { ALERT_TYPES } from '../data/demoData.js';
 
 export async function render(root, ctx) {
+  if (!ctx.provider.capabilities.alerts) {
+    root.innerHTML = `<div class="page-head"><h1>מרכז התראות מידע</h1></div>${notConnectedView('התראות מידע')}`;
+    return;
+  }
   const tz = ctx.tz();
   let type = ALERT_TYPES.includes(ctx.query.type) ? ctx.query.type : '';
   let symbol = ctx.query.symbol ?? '';

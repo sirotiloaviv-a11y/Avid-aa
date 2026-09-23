@@ -24,12 +24,14 @@ niqqud, and dispatches alerts.
 
 ## [`market_info/`](market_info/README.md) — stock and crypto information prototype (Hebrew)
 
-A local, demo-data-only prototype of a market information dashboard: watchlist,
-charts, news, event calendar and factual information alerts, in right-to-left
-Hebrew. No live data, no trading account, no recommendations.
+A local market information dashboard in right-to-left Hebrew: watchlist,
+charts, news, event calendar and factual information alerts. Runs on fictional
+demo data by default; an optional market-data mode shows delayed / end-of-day
+prices from Alpha Vantage (stocks) and CoinGecko (crypto) using keys you keep
+in a local `.env`. No trading account, no recommendations.
 
 ```bash
 cd market_info && npm start   # http://localhost:5173
 ```
 
-No dependencies. [Full documentation →](market_info/README.md)
+No npm dependencies. [Full documentation (Hebrew) →](market_info/README.md)

@@ -63,7 +63,7 @@ test('store persists watchlist, prefs and reminders', () => {
 test('store survives corrupt or missing storage', () => {
   const storage = memoryStorage();
   storage.setItem(STORAGE_KEY, '{not json');
-  assert.ok(createStore(storage).get().watchlist.length > 0);
+  assert.ok(createStore(storage).getWatchlist().length > 0);
   const s = createStore(null);
   s.toggleWatch('TVLA');
   assert.ok(s.isWatched('TVLA'));
@@ -89,4 +89,24 @@ test('number formatting', () => {
   assert.equal(formatPct(-5.8), '−5.80%');
   assert.equal(formatPrice(1840.5), '$1,840.50');
   assert.equal(formatPrice(0.84213), '$0.8421');
+});
+
+test('store keeps separate watchlists per data mode and migrates stage-1 state', () => {
+  const storage = memoryStorage();
+  storage.setItem(STORAGE_KEY, JSON.stringify({ watchlist: ['TVLA'], selectedSymbol: 'TVLA', prefs: { timeZone: 'UTC' } }));
+  const s = createStore(storage);
+  assert.equal(s.mode(), 'demo');
+  assert.deepEqual(s.getWatchlist(), ['TVLA']);
+  assert.equal(s.getSelected(), 'TVLA');
+  assert.equal(s.get().prefs.timeZone, 'UTC');
+  s.setPrefs({ dataMode: 'market' });
+  assert.deepEqual(s.getWatchlist(), []);
+  s.toggleWatch('AAPL');
+  assert.equal(s.getSelected(), 'AAPL');
+  assert.ok(!s.isWatched('TVLA'));
+  s.setPrefs({ dataMode: 'demo' });
+  assert.deepEqual(s.getWatchlist(), ['TVLA']);
+  assert.ok(!s.isWatched('AAPL'));
+  storage.setItem(STORAGE_KEY, JSON.stringify({ prefs: { dataMode: 'bogus' } }));
+  assert.equal(createStore(storage).mode(), 'demo');
 });

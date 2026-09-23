@@ -10,6 +10,10 @@ import { mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createAppServer } from '../server.mjs';
+import { loadConfig } from '../server/config.mjs';
+import { createMarketService } from '../server/marketService.mjs';
+import { lastCompletedSessionDate } from '../server/time.mjs';
+import { avDaily, cgMarkets, cgChart, fakeFetch } from '../tests/fixtures/make.mjs';
 
 async function loadPlaywright() {
   try { return await import('playwright'); } catch { /* fall through to global install */ }
@@ -28,9 +32,33 @@ if (!pw) {
 }
 
 const dir = resolve(fileURLToPath(new URL('..', import.meta.url)), process.argv[2] ?? 'src');
-const server = createAppServer(dir);
+// Market mode runs against a simulated provider (synthetic payloads in the
+// documented formats). No real provider is contacted by this script.
+const lastSession = lastCompletedSessionDate(Date.now());
+const upstream = fakeFetch([
+  [(u) => u.hostname === 'av.test' && u.searchParams.get('symbol') === 'FAIL', () => new Error('simulated disconnect')],
+  [(u) => u.hostname === 'av.test' && u.searchParams.get('symbol') === 'ZZZZ', () => ({ body: { 'Error Message': 'Invalid API call.' } })],
+  [(u) => u.hostname === 'av.test', (u) => ({ body: avDaily(u.searchParams.get('symbol'), lastSession, 100) })],
+  [(u) => u.pathname.endsWith('/coins/markets'), () => ({ body: cgMarkets([['bitcoin', 'btc', 'Bitcoin', 61000, 500]], new Date(Date.now() - 120000).toISOString()) })],
+  [(u) => u.pathname.includes('/market_chart'), () => ({ body: cgChart(Date.now(), 90) })],
+]);
+const marketEnv = {
+  ALPHA_VANTAGE_BASE_URL: 'https://av.test/query', COINGECKO_BASE_URL: 'https://cg.test/api/v3',
+  MARKET_STOCK_SYMBOLS: 'AAPL=Apple,MSFT=Microsoft,FAIL=Failing Example', MARKET_CRYPTO_ASSETS: 'BTC=bitcoin',
+  ALPHA_VANTAGE_PER_MINUTE: '100', ALPHA_VANTAGE_DAILY_LIMIT: '1000',
+};
+const configured = createMarketService({
+  config: loadConfig({ env: { ...marketEnv, ALPHA_VANTAGE_API_KEY: 'e2e-fake', COINGECKO_DEMO_API_KEY: 'e2e-fake' } }),
+  fetchImpl: upstream.impl,
+});
+const unconfigured = createMarketService({ config: loadConfig({ env: marketEnv }), fetchImpl: upstream.impl });
+
+const server = createAppServer(dir, { market: configured });
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const base = `http://127.0.0.1:${server.address().port}/`;
+const server2 = createAppServer(dir, { market: unconfigured });
+await new Promise((r) => server2.listen(0, '127.0.0.1', r));
+const base2 = `http://127.0.0.1:${server2.address().port}/`;
 const shots = process.env.SCREENSHOTS;
 if (shots) mkdirSync(shots, { recursive: true });
 
@@ -258,13 +286,129 @@ try {
     await snap(phone, '09-alerts-phone');
   });
 
+  const setMode = async (p, url, mode) => {
+    await p.goto(`${url}#/settings`);
+    await p.check(`input[name="dataMode"][value="${mode}"]`);
+    await p.click('#prefs button[type="submit"]');
+    await p.waitForFunction((m) => document.querySelector('[data-mode-banner]')?.dataset.mode === m, mode);
+  };
+
+  await check('market mode: switching changes the banner and keeps demo data out', async () => {
+    await setMode(page, base, 'market');
+    expect((await page.textContent('[data-mode-banner]')).includes('לא בזמן אמת'), 'market banner missing');
+    await page.waitForSelector('#sources [data-provider="alpha_vantage"]');
+    expect((await page.textContent('#sources')).includes('מפתח הוגדר'), 'provider status missing');
+    expect(!(await page.textContent('#sources')).includes('e2e-fake'), 'key leaked to the page');
+    await page.goto(base);
+    await settle(page);
+    expect((await page.textContent('#overview')).includes('מסחר במניות בארה״ב'), 'session card missing');
+    expect(await page.isVisible('#watchlist .state-empty'), 'market watchlist should start empty');
+    expect(await page.locator('#home-news [data-not-connected]').count() === 1, 'news not marked not-connected');
+    expect(await page.locator('.tag-demo:has-text("ידיעת הדגמה")').count() === 0, 'demo news leaked into market mode');
+    expect(await page.isHidden('[data-unread]'), 'demo alert badge shown in market mode');
+  });
+
+  await check('market mode: asset list shows source, delay, time and per-row failures', async () => {
+    await page.goto(`${base}#/assets`);
+    await settle(page);
+    expect(await page.locator('.asset-row').count() === 4, 'expected 4 configured assets');
+    const aapl = await page.textContent('.asset-row:has([data-watch="AAPL"])');
+    expect(aapl.includes('Alpha Vantage') && aapl.includes('סוף יום'), 'stock row meta missing');
+    const btc = await page.textContent('.asset-row:has([data-watch="BTC"])');
+    expect(btc.includes('CoinGecko') && btc.includes('מושהה'), 'crypto row meta missing');
+    const fail = await page.textContent('.asset-row:has([data-watch="FAIL"])');
+    expect(fail.includes('תקלה בקבלת נתונים'), 'failing row not marked as fault');
+    await page.click('[data-watch="AAPL"]');
+    await page.click('[data-watch="BTC"]');
+    await snap(page, '10-market-assets');
+  });
+
+  await check('market mode: stock page shows source, data time, delay and market state', async () => {
+    await page.goto(`${base}#/asset/AAPL`);
+    await settle(page);
+    const meta = await page.textContent('.data-meta');
+    for (const part of ['מקור', 'Alpha Vantage', 'מועד הנתון', 'השהיה ידועה', 'סוף יום']) expect(meta.includes(part), `missing "${part}"`);
+    expect((await page.textContent('main')).includes('מצב המסחר בארה״ב כעת'), 'market state missing');
+    expect(await page.locator('#asset-chart svg .line').count() === 1, 'chart missing');
+    expect(await page.locator('#asset-news [data-not-connected]').count() === 1, 'asset news not marked not-connected');
+    await page.click('[data-range="90"]');
+    await settle(page);
+    expect(await page.locator('#asset-chart svg .vol').count() === 90, 'expected 90 real volume bars');
+    await snap(page, '11-market-stock');
+  });
+
+  await check('market mode: crypto page credits CoinGecko and draws no candles', async () => {
+    await page.goto(`${base}#/asset/BTC`);
+    await settle(page);
+    expect((await page.textContent('main')).includes('Powered by CoinGecko'), 'attribution missing');
+    expect((await page.textContent('main')).includes('שינוי ב-24 השעות האחרונות'), '24h basis not labeled');
+    expect((await page.textContent('main')).includes('ללא נרות'), 'price-only series not explained');
+  });
+
+  await check('market mode: unknown symbol and failed fetch are reported, not filled in', async () => {
+    await page.goto(`${base}#/assets?q=ZZZZ`);
+    await settle(page);
+    await page.click('[data-lookup]');
+    await page.waitForFunction(() => location.hash === '#/asset/ZZZZ');
+    await page.waitForFunction(() => document.querySelector('main h1')?.textContent.includes('נכס לא נמצא'), null, { timeout: 5000 })
+      .catch(async () => { throw new Error(`unknown symbol not handled: ${(await page.textContent('main')).slice(0, 160)}`); });
+    await page.goto(`${base}#/asset/FAIL`);
+    await settle(page);
+    expect((await page.textContent('.state-error')).includes('תקלה בקבלת נתונים'), 'fetch failure not shown');
+    expect(await page.locator('#asset-chart svg').count() === 0, 'chart drawn despite failure');
+  });
+
+  await check('market mode: news, events and alerts pages say "not connected"', async () => {
+    for (const path of ['news', 'events', 'alerts']) {
+      await page.goto(`${base}#/${path}`);
+      expect(await page.locator('[data-not-connected]').count() === 1, `#/${path} not marked`);
+      expect(await page.locator('.news-card, .event-row, .alert-card').count() === 0, `#/${path} shows content`);
+    }
+    await page.goto(base);
+    await settle(page);
+    expect(await page.locator('#watchlist .asset-row').count() === 2, 'market watchlist not used on home');
+    expect(await page.locator('#chart-box svg').count() === 1, 'home chart missing');
+    await snap(page, '12-market-home');
+  });
+
+  await check('market mode without keys shows "setup required" with instructions', async () => {
+    const p2 = await newPage();
+    await setMode(p2, base2, 'market');
+    await p2.waitForSelector('#sources .tag-setup');
+    expect((await p2.textContent('#sources')).includes('ALPHA_VANTAGE_API_KEY'), 'missing key name');
+    expect(await p2.isVisible('#sources details[open] .steps'), 'setup steps not shown');
+    await snap(p2, '13-setup-required');
+    await p2.goto(`${base2}#/assets`);
+    await settle(p2);
+    expect(await p2.locator('.row-error:has-text("נדרשת הגדרה")').count() === 4, 'rows not marked setup-required');
+    await p2.goto(`${base2}#/asset/AAPL`);
+    await settle(p2);
+    expect(await p2.isVisible('.state-setup:has-text("נדרשת הגדרה")'), 'asset page setup state missing');
+    expect(upstream.calls.every((c) => c.url.searchParams.get('apikey') !== ''), 'called provider without a key');
+  });
+
+  await check('market mode on a phone: no horizontal scroll', async () => {
+    const phone = await newPage({ width: 390, height: 844 });
+    await setMode(phone, base, 'market');
+    for (const path of ['', 'assets', 'asset/AAPL', 'asset/BTC', 'settings']) {
+      await phone.goto(`${base}#/${path}`);
+      await settle(phone);
+      const overflow = await phone.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+      expect(overflow <= 1, `horizontal overflow ${overflow}px on #/${path}`);
+    }
+    await snap(phone, '14-market-settings-phone');
+  });
+
   await check('no console errors', async () => {
-    const relevant = consoleErrors.filter((e) => !e.includes('favicon'));
+    // 4xx/5xx answers the tests provoke on purpose are logged by the browser
+    // as failed resources; those are expected here.
+    const relevant = consoleErrors.filter((e) => !e.includes('favicon') && !/status of (404|503|504|502)/.test(e));
     expect(relevant.length === 0, relevant.join(' | '));
   });
 } finally {
   await browser.close();
   server.close();
+  server2.close();
 }
 
 const failed = results.filter((r) => !r.ok).length;

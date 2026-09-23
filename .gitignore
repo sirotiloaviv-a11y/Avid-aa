@@ -22,3 +22,6 @@ moat.sarif
 
 # market_info build output
 market_info/dist/
+
+# market_info local response cache
+market_info/.cache/

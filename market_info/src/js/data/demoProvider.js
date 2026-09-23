@@ -8,6 +8,8 @@ export class DemoProvider {
     this.dataset = buildDemoDataset(now);
     this.latencyMs = latencyMs;
     this.shouldFail = shouldFail;
+    this.capabilities = { news: true, events: true, alerts: true, demoTrigger: true };
+    this.mode = 'demo';
   }
 
   async respond(produce) {

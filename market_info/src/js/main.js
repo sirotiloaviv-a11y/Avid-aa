@@ -20,12 +20,17 @@ const NAV = [
 ];
 
 const store = createStore();
-const provider = createProvider({ shouldFail: () => store.get().prefs.simulateError });
+const providers = {
+  demo: createProvider('demo', { shouldFail: () => store.get().prefs.simulateError }),
+  market: createProvider('market'),
+};
+const currentProvider = () => providers[store.mode()] ?? providers.demo;
 
 // Generated alerts are fixed for the session; manual demo alerts live in the store.
 let generatedAlerts = null;
 async function getAllAlerts() {
-  if (!generatedAlerts) generatedAlerts = await provider.getAlerts();
+  if (store.mode() !== 'demo') return [];
+  if (!generatedAlerts) generatedAlerts = await providers.demo.getAlerts();
   return mergeAlerts(generatedAlerts, store.get().manualAlerts);
 }
 
@@ -49,14 +54,27 @@ function resolve(segments) {
 }
 
 const shell = document.getElementById('app');
+const BANNERS = {
+  demo: `<strong>נתוני הדגמה — לא מידע בזמן אמת</strong>
+    <span>כל הנכסים, המחירים, הידיעות והאירועים בדיוניים. המערכת אינה מספקת ייעוץ או המלצות, ואינה מחוברת לחשבון מסחר.</span>`,
+  market: `<strong>מצב נתוני שוק — מושהים או סוף יום, לא בזמן אמת</strong>
+    <span>ליד כל נתון מוצגים המקור, מועד הנתון וההשהיה. חדשות, אירועים והתראות טרם חוברו. אין ייעוץ, המלצות או חיבור לחשבון מסחר.</span>`,
+};
+
+function renderBanner() {
+  const el = shell.querySelector('[data-mode-banner]');
+  const mode = store.mode();
+  el.className = `demo-banner mode-${mode}`;
+  el.dataset.mode = mode;
+  el.innerHTML = BANNERS[mode];
+  shell.querySelector('[data-brand-tag]').textContent = mode === 'demo' ? 'הדגמה' : 'נתוני שוק';
+}
+
 shell.innerHTML = `
-  <div class="demo-banner" role="note">
-    <strong>נתוני הדגמה — לא מידע בזמן אמת</strong>
-    <span>כל הנכסים, המחירים, הידיעות והאירועים בדיוניים. המערכת אינה מספקת ייעוץ או המלצות, ואינה מחוברת לחשבון מסחר.</span>
-  </div>
+  <div class="demo-banner" role="note" data-mode-banner></div>
   <div class="layout">
     <nav class="sidebar" aria-label="ניווט ראשי">
-      <div class="brand">מרכז מידע שוק <span class="tag tag-demo">אבטיפוס</span></div>
+      <div class="brand">מרכז מידע שוק <span class="tag tag-demo" data-brand-tag></span></div>
       <ul>${NAV.map((n) => `<li><a href="#/${n.path}" data-nav="${n.path}">${esc(n.label)}
         ${n.path === 'alerts' ? '<span class="badge" data-unread hidden></span>' : ''}</a></li>`).join('')}</ul>
     </nav>
@@ -64,10 +82,12 @@ shell.innerHTML = `
   </div>`;
 
 const outlet = document.getElementById('view');
+renderBanner();
 let renderToken = 0;
 
 async function updateUnreadBadge() {
   const badge = shell.querySelector('[data-unread]');
+  if (store.mode() !== 'demo') { badge.hidden = true; return; }
   try {
     const list = visibleAlerts(await getAllAlerts());
     const unread = list.filter((a) => !store.get().readAlerts[a.id]).length;
@@ -94,7 +114,8 @@ async function route() {
     return;
   }
   const ctx = {
-    provider,
+    provider: currentProvider(),
+    mode: store.mode(),
     store,
     params: match.params,
     query,
@@ -116,7 +137,14 @@ async function route() {
   if (token === renderToken) outlet.focus({ preventScroll: true });
 }
 
-store.subscribe(() => updateUnreadBadge());
+let lastMode = store.mode();
+store.subscribe(() => {
+  updateUnreadBadge();
+  if (store.mode() !== lastMode) {
+    lastMode = store.mode();
+    renderBanner();
+  }
+});
 window.addEventListener('hashchange', route);
 route();
 updateUnreadBadge();
