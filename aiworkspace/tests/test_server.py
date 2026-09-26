@@ -12,7 +12,12 @@ from pathlib import Path
 
 from aiworkspace.chat import build_context
 from aiworkspace.config import load_settings
-from aiworkspace.providers.base import ProviderError, StreamEnd, TextDelta
+from aiworkspace.providers.base import (
+    ProviderError,
+    ResponseStart,
+    StreamEnd,
+    TextDelta,
+)
 from aiworkspace.providers.demo import DemoProvider
 from aiworkspace.server import App, make_server
 from aiworkspace.store import Message
@@ -23,14 +28,18 @@ class ScriptedProvider:
     model = "scripted-1"
     simulated = False
 
-    def __init__(self, chunks=("Hi", " there"), error=None, gate=None):
+    def __init__(
+        self, chunks=("Hi", " there"), error=None, gate=None, end=StreamEnd("end_turn")
+    ):
         self.chunks = chunks
         self.error = error
         self.gate = gate
+        self.end = end
         self.calls = []
 
     def stream(self, system, turns, max_tokens, cancel, deadline):
         self.calls.append(turns)
+        yield ResponseStart("served-model-7", 21)
         for i, chunk in enumerate(self.chunks):
             if self.gate is not None and i == 1:
                 self.gate.wait(5)
@@ -40,7 +49,7 @@ class ScriptedProvider:
             yield TextDelta(chunk)
         if self.error:
             raise self.error
-        yield StreamEnd("end_turn")
+        yield self.end
 
 
 class ServerTestCase(unittest.TestCase):
@@ -280,6 +289,17 @@ class ProviderErrorFlowTest(ServerTestCase):
         self.assertEqual(reply["content"], "Hi there")
         self.assertFalse(reply["simulated"])
 
+    def test_live_failure_never_falls_back_to_demo(self):
+        cid = self.new_conversation()
+        _, events = self.send(cid, "hello")
+        self.assertFalse(any("Demo mode" in json.dumps(d) for _, d in events))
+        reply = events[-1][1]["assistant_message"]
+        self.assertEqual(reply["provider"], "scripted")
+        self.assertFalse(reply["simulated"])
+        self.assertNotIn("simulated", reply["content"].lower())
+        status, data = self.json("GET", "/api/status")
+        self.assertEqual((data["provider"], data["simulated"]), ("scripted", False))
+
     def test_errored_reply_is_excluded_from_next_context(self):
         cid = self.new_conversation()
         self.send(cid, "first")
@@ -341,3 +361,93 @@ class ContextTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StopReasonFlowTest(ServerTestCase):
+    def reply_for(self, end):
+        self.stop()
+        self.start(ScriptedProvider(end=end))
+        cid = self.new_conversation()
+        _, events = self.send(cid, "hello")
+        self.assertEqual(events[-1][0], "done")
+        return events[-1][1]["assistant_message"]
+
+    def test_complete_reply_records_usage_and_served_model(self):
+        reply = self.reply_for(StreamEnd("end_turn", 9))
+        self.assertEqual(reply["status"], "complete")
+        self.assertEqual(reply["response_model"], "served-model-7")
+        self.assertEqual((reply["input_tokens"], reply["output_tokens"]), (21, 9))
+
+    def test_token_limit_is_marked_incomplete(self):
+        reply = self.reply_for(StreamEnd("max_tokens", 100))
+        self.assertEqual(
+            (reply["status"], reply["stop_reason"]), ("incomplete", "max_tokens")
+        )
+        self.assertEqual(reply["content"], "Hi there")
+
+    def test_other_stop_reasons_are_incomplete(self):
+        for reason in [
+            "refusal",
+            "model_context_window_exceeded",
+            "pause_turn",
+            "new_one",
+        ]:
+            self.assertEqual(
+                self.reply_for(StreamEnd(reason))["status"], "incomplete", reason
+            )
+        self.assertEqual(
+            self.reply_for(StreamEnd("stop_sequence"))["status"], "complete"
+        )
+
+    def test_incomplete_reply_stays_in_context(self):
+        self.stop()
+        provider = ScriptedProvider(end=StreamEnd("max_tokens"))
+        self.start(provider)
+        cid = self.new_conversation()
+        self.send(cid, "one")
+        self.send(cid, "two")
+        self.assertEqual(
+            [t.role for t in provider.calls[-1]], ["user", "assistant", "user"]
+        )
+
+    def test_malformed_content_length_on_create(self):
+        resp, _ = self.request(
+            "POST",
+            "/api/conversations",
+            raw=b"",
+            headers={"Content-Length": "abc", "Content-Type": "application/json"},
+        )
+        self.assertEqual(resp.status, 400)
+
+
+class ProviderClosedOnCancelTest(unittest.TestCase):
+    def test_generator_closed_when_cancelled(self):
+        import tempfile as _t
+
+        from aiworkspace.chat import ChatService
+        from aiworkspace.store import Store
+
+        closed = []
+
+        class Slow:
+            name, model, simulated = "slow", "m", False
+
+            def stream(self, system, turns, max_tokens, cancel, deadline):
+                try:
+                    yield TextDelta("a")
+                    cancel.set()
+                    yield TextDelta("b")
+                    yield TextDelta("never")
+                finally:
+                    closed.append(True)
+
+        with _t.TemporaryDirectory() as tmp:
+            store = Store(Path(tmp) / "db")
+            svc = ChatService(store, Slow(), 10, 1000, 30)
+            cid = store.create_conversation("t").id
+            sent = []
+            svc.reply(cid, "hi", lambda e, d: sent.append((e, d)), lambda: None)
+            self.assertEqual(closed, [True])
+            final = sent[-1][1]["assistant_message"]
+            self.assertEqual(final["status"], "cancelled")
+            self.assertEqual(final["content"], "ab")

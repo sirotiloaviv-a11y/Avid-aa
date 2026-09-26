@@ -5,8 +5,9 @@ import { h, renderMarkdown } from "./markdown.js";
 /**
  * @typedef {{id: string, title: string, created_at: number, updated_at: number}} Conversation
  * @typedef {{id: string, conversation_id: string, role: "user"|"assistant", content: string,
- *   status: "complete"|"streaming"|"cancelled"|"error", provider: string|null, model: string|null,
- *   simulated: boolean, error: string|null, stop_reason: string|null, created_at: number}} Message
+ *   status: "complete"|"streaming"|"incomplete"|"cancelled"|"error", provider: string|null, model: string|null,
+ *   simulated: boolean, error: string|null, stop_reason: string|null, created_at: number,
+ *   response_model?: string|null, input_tokens?: number|null, output_tokens?: number|null}} Message
  * @typedef {{provider: string, model: string, simulated: boolean,
  *   limits: {max_message_chars: number}}} Status
  * @typedef {{cid: string, messages: Message[], assistant: Message|null, controller: AbortController,
@@ -140,7 +141,8 @@ function renderStaticText() {
   els.langToggle.setAttribute("lang", getLang() === "he" ? "en" : "he");
   els.menuBtn.setAttribute("aria-label", t("menu"));
   els.input.placeholder = t("placeholder");
-  els.inputLabel.textContent = t("placeholder");
+  els.input.title = t("inputHint");
+  els.inputLabel.textContent = t("inputHint");
   els.send.textContent = t("send");
   els.stop.textContent = t("stop");
   els.demoBanner.textContent = t("demoBanner");
@@ -230,6 +232,9 @@ function renderListItem(/** @type {Conversation} */ c) {
 
 // ---------------------------------------------------------------- rendering: messages
 
+/** @param {unknown} v */
+const known = (v) => v !== null && v !== undefined;
+
 const mdLabels = () => ({ copy: t("copy"), copied: t("copied") });
 
 function messageNode(/** @type {Message} */ m, /** @type {boolean} */ live = false) {
@@ -249,9 +254,22 @@ function messageNode(/** @type {Message} */ m, /** @type {boolean} */ live = fal
   if (m.role === "assistant") {
     const meta = [];
     if (m.simulated) meta.push(h("span", { class: "tag tag-demo" }, [t("simulated")]));
-    if (m.status === "cancelled") meta.push(h("span", { class: "tag" }, [t("stopped")]));
-    if (m.stop_reason === "max_tokens") meta.push(h("span", { class: "tag" }, [t("truncated")]));
-    if (m.stop_reason === "refusal") meta.push(h("span", { class: "tag tag-warn" }, [t("refused")]));
+    if (m.status === "cancelled") meta.push(h("span", { class: "tag tag-warn" }, [t("stopped")]));
+    if (m.status === "incomplete") {
+      const reason =
+        m.stop_reason === "max_tokens" ? t("truncated")
+        : m.stop_reason === "refusal" ? t("refused")
+        : `${t("incomplete")} (${m.stop_reason ?? "?"})`;
+      meta.push(h("span", { class: "tag tag-warn" }, [reason]));
+    }
+    if (m.status === "error" && m.content) meta.push(h("span", { class: "tag tag-warn" }, [t("partial")]));
+    if (!m.simulated && (m.response_model || known(m.output_tokens))) {
+      const usage = [m.response_model ?? m.model ?? ""];
+      if (known(m.input_tokens) || known(m.output_tokens)) {
+        usage.push(`${m.input_tokens ?? "?"} ${t("tokensIn")} / ${m.output_tokens ?? "?"} ${t("tokensOut")}`);
+      }
+      meta.push(h("span", { class: "usage", dir: "ltr" }, [usage.filter(Boolean).join(" · ")]));
+    }
     if (m.status === "error") {
       const err = h("div", { class: "msg-error", role: "alert", dir: "auto" }, [m.error || t("interrupted")]);
       if (state.lastFailedText && !state.stream) {

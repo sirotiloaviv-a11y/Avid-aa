@@ -75,6 +75,36 @@ class StoreTest(unittest.TestCase):
         with self.assertRaises(sqlite3.IntegrityError):
             self.store.add_message(c.id, "system", "x")
 
+    def test_upgrades_phase1_database(self):
+        old = Path(self.tmp.name) / "old.sqlite3"
+        with sqlite3.connect(old) as db:
+            db.executescript(
+                "CREATE TABLE conversations (id TEXT PRIMARY KEY, title TEXT NOT NULL,"
+                " created_at REAL NOT NULL, updated_at REAL NOT NULL);"
+                "CREATE TABLE messages (id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL"
+                " REFERENCES conversations(id) ON DELETE CASCADE, role TEXT NOT NULL,"
+                " content TEXT NOT NULL, status TEXT NOT NULL, provider TEXT, model TEXT,"
+                " simulated INTEGER NOT NULL DEFAULT 0, error TEXT, stop_reason TEXT,"
+                " created_at REAL NOT NULL);"
+                "INSERT INTO conversations VALUES ('c1', 'old chat', 1, 1);"
+                "INSERT INTO messages (id, conversation_id, role, content, status,"
+                " created_at) VALUES ('m1', 'c1', 'user', 'kept', 'complete', 1);"
+            )
+        store = Store(old)
+        msg = store.list_messages("c1")[0]
+        self.assertEqual((msg.content, msg.output_tokens), ("kept", None))
+        a = store.add_message("c1", "assistant", "", status="streaming")
+        done = store.finish_message(
+            a.id,
+            "x",
+            "incomplete",
+            stop_reason="max_tokens",
+            response_model="m",
+            input_tokens=1,
+            output_tokens=2,
+        )
+        self.assertEqual((done.status, done.output_tokens), ("incomplete", 2))
+
     def test_history_survives_restart(self):
         c = self.store.create_conversation("persisted")
         self.store.add_message(c.id, "user", "remember me")

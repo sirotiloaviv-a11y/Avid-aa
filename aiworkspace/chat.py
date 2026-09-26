@@ -10,6 +10,7 @@ from typing import Callable
 from .providers.base import (
     Heartbeat,
     ProviderError,
+    ResponseStart,
     StreamEnd,
     TextDelta,
     TextProvider,
@@ -28,6 +29,11 @@ SYSTEM_PROMPT = (
     "in this workspace; do not claim to have done so."
 )
 CHECKPOINT_EVERY_S = 2.0
+PING_EVERY_S = 5.0
+# Stop reasons that mean the model finished its answer. Anything else
+# (max_tokens, refusal, model_context_window_exceeded, pause_turn, tool_use,
+# or a value added later) is stored as "incomplete" and labelled in the UI.
+COMPLETE_STOP_REASONS = frozenset({"end_turn", "stop_sequence"})
 
 # (event name, JSON-serialisable payload). Raises OSError if the client went away.
 Emit = Callable[[str, dict[str, object]], None]
@@ -43,7 +49,7 @@ def build_context(messages: list[Message], max_chars: int) -> list[Turn]:
     turns = [
         Turn(m.role, m.content)  # type: ignore[arg-type]
         for m in messages
-        if m.content.strip() and m.status in {"complete", "cancelled"}
+        if m.content.strip() and m.status in {"complete", "incomplete", "cancelled"}
     ]
     kept: list[Turn] = []
     used = 0
@@ -156,17 +162,24 @@ class ChatService:
         status = "complete"
         stop_reason = "end_turn"
         error: str | None = None
-        last_checkpoint = time.monotonic()
+        response_model: str | None = None
+        input_tokens: int | None = None
+        output_tokens: int | None = None
+        last_checkpoint = last_ping = time.monotonic()
         deadline = time.monotonic() + self.request_timeout_s
+        events = self.provider.stream(
+            SYSTEM_PROMPT, turns, self.max_output_tokens, cancel, deadline
+        )
         try:
-            for ev in self.provider.stream(
-                SYSTEM_PROMPT, turns, self.max_output_tokens, cancel, deadline
-            ):
+            for ev in events:
                 if isinstance(ev, TextDelta):
                     parts.append(ev.text)
                     send("delta", {"text": ev.text})
+                elif isinstance(ev, ResponseStart):
+                    response_model, input_tokens = ev.model, ev.input_tokens
                 elif isinstance(ev, Heartbeat):
-                    if not client_gone:
+                    if time.monotonic() - last_ping > PING_EVERY_S and not client_gone:
+                        last_ping = time.monotonic()
                         try:
                             ping()
                         except OSError:
@@ -174,14 +187,17 @@ class ChatService:
                             cancel.set()
                 elif isinstance(ev, StreamEnd):
                     stop_reason = ev.stop_reason
+                    output_tokens = ev.output_tokens
                 if cancel.is_set():
-                    status, stop_reason = "cancelled", "cancelled"
+                    stop_reason = "cancelled"
                     break
                 if time.monotonic() - last_checkpoint > CHECKPOINT_EVERY_S:
                     self.store.update_message_content(assistant.id, "".join(parts))
                     last_checkpoint = time.monotonic()
             if stop_reason == "cancelled":
                 status = "cancelled"
+            elif stop_reason not in COMPLETE_STOP_REASONS:
+                status = "incomplete"
         except ProviderError as exc:
             status, error, stop_reason = "error", exc.message, "error"
             log.warning("provider error kind=%s status=%s", exc.kind, exc.status)
@@ -189,9 +205,21 @@ class ChatService:
             status, error, stop_reason = "error", "Unexpected server error.", "error"
             # Type only: the exception text could quote conversation content.
             log.error("unexpected error during reply: %s", type(exc).__name__)
+        finally:
+            # Closes the upstream HTTP response now rather than at GC time.
+            close = getattr(events, "close", None)
+            if close is not None:
+                close()
 
         final = self.store.finish_message(
-            assistant.id, "".join(parts), status, error=error, stop_reason=stop_reason
+            assistant.id,
+            "".join(parts),
+            status,
+            error=error,
+            stop_reason=stop_reason,
+            response_model=response_model,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
         )
         if status == "error":
             send("error", {"message": error or "", "assistant_message": _d(final)})

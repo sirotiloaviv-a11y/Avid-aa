@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS messages (
     conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
     role            TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
     content         TEXT NOT NULL,
-    -- complete | streaming | cancelled | error
+    -- complete | streaming | incomplete | cancelled | error
     status          TEXT NOT NULL,
     -- which adapter produced an assistant message, and whether it was simulated
     provider        TEXT,
@@ -35,13 +35,28 @@ CREATE TABLE IF NOT EXISTS messages (
     error           TEXT,
     -- provider stop reason for assistant messages, e.g. end_turn, max_tokens
     stop_reason     TEXT,
-    created_at      REAL NOT NULL
+    created_at      REAL NOT NULL,
+    -- as reported by the provider for this reply
+    response_model  TEXT,
+    input_tokens    INTEGER,
+    output_tokens   INTEGER
 );
 CREATE INDEX IF NOT EXISTS messages_by_conversation
     ON messages (conversation_id, created_at);
 """
 
-MESSAGE_STATUSES = frozenset({"complete", "streaming", "cancelled", "error"})
+# incomplete: the provider finished but did not produce a full answer
+# (e.g. max_tokens). cancelled: stopped by the user. error: failed; any text
+# already streamed is kept and shown as partial.
+MESSAGE_STATUSES = frozenset(
+    {"complete", "streaming", "incomplete", "cancelled", "error"}
+)
+# Columns added after the first release, applied to existing databases.
+_ADDED_COLUMNS = {
+    "response_model": "TEXT",
+    "input_tokens": "INTEGER",
+    "output_tokens": "INTEGER",
+}
 
 
 @dataclass
@@ -68,6 +83,9 @@ class Message:
     error: str | None
     stop_reason: str | None
     created_at: float
+    response_model: str | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -89,6 +107,10 @@ class Store:
         with self._connect() as db:
             db.execute("PRAGMA journal_mode=WAL")
             db.executescript(SCHEMA)
+            have = {r["name"] for r in db.execute("PRAGMA table_info(messages)")}
+            for column, ctype in _ADDED_COLUMNS.items():
+                if column not in have:
+                    db.execute(f"ALTER TABLE messages ADD COLUMN {column} {ctype}")
             # A process that died mid-stream leaves "streaming" rows behind.
             db.execute(
                 "UPDATE messages SET status='error', error='Interrupted by a server restart' "
@@ -214,13 +236,26 @@ class Store:
         status: str,
         error: str | None = None,
         stop_reason: str | None = None,
+        response_model: str | None = None,
+        input_tokens: int | None = None,
+        output_tokens: int | None = None,
     ) -> Message | None:
         if status not in MESSAGE_STATUSES:
             raise ValueError(f"unknown status {status!r}")
         with self._connect() as db:
             db.execute(
-                "UPDATE messages SET content=?, status=?, error=?, stop_reason=? WHERE id=?",
-                (content, status, error, stop_reason, message_id),
+                "UPDATE messages SET content=?, status=?, error=?, stop_reason=?,"
+                " response_model=?, input_tokens=?, output_tokens=? WHERE id=?",
+                (
+                    content,
+                    status,
+                    error,
+                    stop_reason,
+                    response_model,
+                    input_tokens,
+                    output_tokens,
+                    message_id,
+                ),
             )
             row = db.execute(
                 "SELECT * FROM messages WHERE id=?", (message_id,)

@@ -26,5 +26,6 @@ def build_provider(settings: Settings) -> TextProvider:
             model=settings.anthropic_model,
             base_url=settings.anthropic_base_url,
             fallbacks=settings.anthropic_fallbacks,
+            max_retries=settings.max_retries,
         )
     return DemoProvider()

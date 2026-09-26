@@ -32,12 +32,21 @@ class Heartbeat:
 
 
 @dataclass(frozen=True)
+class ResponseStart:
+    """The provider accepted the request. ``model`` is the ID it reports serving."""
+
+    model: str | None = None
+    input_tokens: int | None = None
+
+
+@dataclass(frozen=True)
 class StreamEnd:
-    # end_turn | max_tokens | refusal | cancelled | stop_sequence | ...
+    # end_turn | stop_sequence | max_tokens | refusal | cancelled | ...
     stop_reason: str
+    output_tokens: int | None = None
 
 
-StreamEvent = Union[TextDelta, Heartbeat, StreamEnd]
+StreamEvent = Union[ResponseStart, TextDelta, Heartbeat, StreamEnd]
 
 ErrorKind = Literal[
     "auth",
@@ -54,9 +63,10 @@ ErrorKind = Literal[
     "protocol",
 ]
 
-RETRYABLE_KINDS: frozenset[str] = frozenset(
-    {"rate_limit", "overloaded", "server", "network", "timeout"}
-)
+# Kinds where the request was rejected before any generation, so repeating it
+# cannot double-bill. Timeouts are excluded: the provider may have processed
+# (and billed) a request whose response we never saw.
+RETRYABLE_KINDS: frozenset[str] = frozenset({"rate_limit", "overloaded", "server"})
 
 
 class ProviderError(Exception):

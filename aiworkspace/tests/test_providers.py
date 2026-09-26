@@ -14,6 +14,7 @@ from aiworkspace.providers.anthropic import AnthropicProvider, iter_sse
 from aiworkspace.providers.base import (
     Heartbeat,
     ProviderError,
+    ResponseStart,
     StreamEnd,
     TextDelta,
     Turn,
@@ -31,7 +32,43 @@ def sse(*events):
 
 
 HAPPY = sse(
-    ("message_start", {"type": "message_start", "message": {"id": "msg_1"}}),
+    (
+        "message_start",
+        {
+            "type": "message_start",
+            "message": {
+                "id": "msg_1",
+                "model": "claude-opus-5",
+                "usage": {"input_tokens": 12, "output_tokens": 1},
+            },
+        },
+    ),
+    # A thinking block (display omitted): never surfaced as text.
+    (
+        "content_block_start",
+        {
+            "type": "content_block_start",
+            "index": 0,
+            "content_block": {"type": "thinking", "thinking": ""},
+        },
+    ),
+    (
+        "content_block_delta",
+        {
+            "type": "content_block_delta",
+            "index": 0,
+            "delta": {"type": "thinking_delta", "thinking": "private reasoning"},
+        },
+    ),
+    (
+        "content_block_delta",
+        {
+            "type": "content_block_delta",
+            "index": 0,
+            "delta": {"type": "signature_delta", "signature": "sig"},
+        },
+    ),
+    ("content_block_stop", {"type": "content_block_stop", "index": 0}),
     (
         "content_block_start",
         {
@@ -122,8 +159,9 @@ class AnthropicRequestTest(unittest.TestCase):
         p, opener, _ = provider_with(HAPPY)
         events = run(p)
         text = "".join(e.text for e in events if isinstance(e, TextDelta))
-        self.assertEqual(text, "Hello שלום")
-        self.assertEqual(events[-1], StreamEnd("end_turn"))
+        self.assertEqual(text, "Hello שלום")  # thinking text is not included
+        self.assertEqual(events[0], ResponseStart("claude-opus-5", 12))
+        self.assertEqual(events[-1], StreamEnd("end_turn", 3))
         self.assertTrue(any(isinstance(e, Heartbeat) for e in events))
 
     def test_request_shape(self):
@@ -135,21 +173,27 @@ class AnthropicRequestTest(unittest.TestCase):
         headers = {k.lower(): v for k, v in req.header_items()}
         self.assertEqual(headers["x-api-key"], KEY)
         self.assertEqual(headers["anthropic-version"], "2023-06-01")
-        self.assertEqual(headers["anthropic-beta"], "server-side-fallback-2026-07-01")
-        body = json.loads(req.data)
-        self.assertEqual(body["model"], "claude-opus-5")
-        self.assertEqual(body["max_tokens"], 100)
-        self.assertTrue(body["stream"])
-        self.assertEqual(body["system"], "sys")
-        self.assertEqual(body["messages"], [{"role": "user", "content": "hi"}])
-        self.assertEqual(body["fallbacks"], "default")
-
-    def test_fallbacks_can_be_disabled(self):
-        p, opener, _ = provider_with(HAPPY, fallbacks="off")
-        run(p)
-        headers = {k.lower() for k, _ in opener.requests[0].header_items()}
+        self.assertEqual(headers["content-type"], "application/json")
+        # Default request is the plain, non-beta Messages request.
         self.assertNotIn("anthropic-beta", headers)
-        self.assertNotIn("fallbacks", json.loads(opener.requests[0].data))
+        body = json.loads(req.data)
+        self.assertEqual(
+            body,
+            {
+                "model": "claude-opus-5",
+                "max_tokens": 100,
+                "stream": True,
+                "messages": [{"role": "user", "content": "hi"}],
+                "system": "sys",
+            },
+        )
+
+    def test_fallbacks_are_opt_in(self):
+        p, opener, _ = provider_with(HAPPY, fallbacks="default")
+        run(p)
+        headers = {k.lower(): v for k, v in opener.requests[0].header_items()}
+        self.assertEqual(headers["anthropic-beta"], "server-side-fallback-2026-07-01")
+        self.assertEqual(json.loads(opener.requests[0].data)["fallbacks"], "default")
 
     def test_key_not_in_repr(self):
         p, _, _ = provider_with()
@@ -165,6 +209,11 @@ class AnthropicRequestTest(unittest.TestCase):
         )
         p, _, _ = provider_with(body)
         self.assertEqual(run(p)[-1], StreamEnd("refusal"))
+
+    def test_max_tokens_stop_reason_and_usage(self):
+        body = HAPPY.replace(b'"end_turn"', b'"max_tokens"')
+        p, _, _ = provider_with(body)
+        self.assertEqual(run(p)[-1], StreamEnd("max_tokens", 3))
 
 
 class AnthropicErrorTest(unittest.TestCase):
@@ -214,7 +263,7 @@ class AnthropicErrorTest(unittest.TestCase):
         events = run(p)
         self.assertEqual(len(opener.requests), 2)
         self.assertEqual(sleeps, [2.0])
-        self.assertEqual(events[-1], StreamEnd("end_turn"))
+        self.assertEqual(events[-1], StreamEnd("end_turn", 3))
 
     def test_overloaded_gives_up_after_max_attempts(self):
         def overloaded():
@@ -240,20 +289,47 @@ class AnthropicErrorTest(unittest.TestCase):
             run(p)
         self.assertKind(ctx, "server")
 
-    def test_network_error(self):
-        p, _, _ = provider_with(*(urllib.error.URLError("dns") for _ in range(3)))
+    def test_ambiguous_network_error_not_retried(self):
+        # The request may have reached the API; retrying could bill twice.
+        p, opener, _ = provider_with(
+            urllib.error.URLError(ConnectionResetError()), HAPPY
+        )
         with self.assertRaises(ProviderError) as ctx:
             run(p)
         self.assertKind(ctx, "network")
+        self.assertEqual(len(opener.requests), 1)
 
-    def test_connect_timeout(self):
-        p, _, _ = provider_with(*(socket.timeout("t") for _ in range(3)))
+    def test_unsent_request_is_retried(self):
+        p, opener, _ = provider_with(
+            urllib.error.URLError(socket.gaierror("dns")),
+            urllib.error.URLError(ConnectionRefusedError()),
+            HAPPY,
+        )
+        self.assertEqual(run(p)[-1], StreamEnd("end_turn", 3))
+        self.assertEqual(len(opener.requests), 3)
+
+    def test_timeout_not_retried(self):
+        p, opener, _ = provider_with(socket.timeout("t"), HAPPY)
         with self.assertRaises(ProviderError) as ctx:
             run(p)
         self.assertKind(ctx, "timeout")
+        self.assertEqual(len(opener.requests), 1)
+
+    def test_retries_are_bounded_and_configurable(self):
+        def overloaded():
+            return http_error(
+                529, {"type": "error", "error": {"type": "overloaded_error"}}
+            )
+
+        p, opener, _ = provider_with(*(overloaded() for _ in range(5)), max_retries=0)
+        with self.assertRaises(ProviderError):
+            run(p)
+        self.assertEqual(len(opener.requests), 1)
+        with self.assertRaises(ValueError):
+            AnthropicProvider(KEY, "m", max_retries=4)
 
     def test_mid_stream_error_event(self):
-        body = HAPPY.split(b"event: content_block_stop")[0] + sse(
+        body = HAPPY.rsplit(b"event: content_block_stop", 1)[0] + sse(
             (
                 "error",
                 {
@@ -262,10 +338,17 @@ class AnthropicErrorTest(unittest.TestCase):
                 },
             )
         )
-        p, _, _ = provider_with(body)
+        p, opener, _ = provider_with(body, HAPPY)
+        events = []
         with self.assertRaises(ProviderError) as ctx:
-            run(p)
+            for ev in p.stream(
+                "", [Turn("user", "hi")], 100, threading.Event(), time.monotonic() + 9
+            ):
+                events.append(ev)
         self.assertKind(ctx, "overloaded")
+        # Text before the error was delivered; the request is not repeated.
+        self.assertIn(TextDelta("Hello"), events)
+        self.assertEqual(len(opener.requests), 1)
 
     def test_malformed_event_data(self):
         p, _, _ = provider_with(b"event: content_block_delta\ndata: {not json\n\n")

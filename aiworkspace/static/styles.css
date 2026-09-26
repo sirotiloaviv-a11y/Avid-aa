@@ -161,6 +161,7 @@ button, input, textarea { font: inherit; color: inherit; }
 .tag { font-size: 11.5px; padding: 1px 8px; border-radius: 999px; background: var(--sidebar); color: var(--muted); border: 1px solid var(--border); }
 .tag-demo { background: var(--warn-soft); color: var(--text); border-style: dashed; }
 .tag-warn { background: var(--danger-soft); color: var(--danger); }
+.usage { font-size: 11.5px; color: var(--muted); align-self: center; font-variant-numeric: tabular-nums; }
 .msg-error { margin-top: 8px; padding: 8px 12px; border-radius: 8px; background: var(--danger-soft); color: var(--danger); font-size: 14px; }
 
 .typing { display: inline-flex; gap: 4px; padding: 6px 0; }

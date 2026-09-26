@@ -84,6 +84,16 @@ class ConfigTest(unittest.TestCase):
         self.assertEqual(s.resolved_provider, "anthropic")
         self.assertNotIn("sk-test-secret", repr(s))
 
+    def test_fallbacks_off_by_default_and_retries_bounded(self):
+        s = load_settings({"ANTHROPIC_API_KEY": "k"}, env_file=None)
+        self.assertEqual(s.anthropic_fallbacks, "off")
+        self.assertEqual(s.max_retries, 2)
+        s = load_settings({"AIWS_ANTHROPIC_FALLBACKS": "default"}, env_file=None)
+        self.assertEqual(s.anthropic_fallbacks, "default")
+        for bad in ["-1", "4", "many"]:
+            with self.assertRaises(ValueError):
+                load_settings({"AIWS_MAX_RETRIES": bad}, env_file=None)
+
     def test_model_is_configurable(self):
         s = load_settings({"AIWS_MODEL": "claude-sonnet-5"}, env_file=None)
         self.assertEqual(s.anthropic_model, "claude-sonnet-5")

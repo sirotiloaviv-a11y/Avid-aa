@@ -2,16 +2,26 @@
 
 The official SDK is the preferred client, but this project is dependency-free
 and the package registries were unreachable when it was written; see README.
-Request and stream shapes follow the official Messages API streaming reference
-(https://platform.claude.com/docs/en/build-with-claude/streaming) and error
-reference (https://platform.claude.com/docs/en/api/errors). Unknown event
-types are ignored, as that reference asks.
 
-  POST {base}/v1/messages  headers: x-api-key, anthropic-version: 2023-06-01
+Sources used (live docs at platform.claude.com were blocked by the build
+environment's network policy, so the Anthropic-published reference bundled
+with Claude Code's claude-api skill, version 2.1.283, was used instead):
+  * curl/examples.md, "Streaming (SSE)" and "Required Headers": request shape
+    and the SSE event sequence.
+  * typescript/claude-api/streaming.md, "Stream Event Types": message_delta
+    carries stop_reason and usage.
+  * shared/error-codes.md: HTTP status / error.type table and retryability.
+  * python/claude-api/README.md, "Stop Reasons".
+Canonical online equivalents: https://platform.claude.com/docs/en/build-with-claude/streaming
+and https://platform.claude.com/docs/en/api/errors.
+
+  POST {base}/v1/messages
+  headers: x-api-key, anthropic-version: 2023-06-01, content-type: application/json
   body: {model, max_tokens, system, messages, stream: true}
-  SSE events: message_start, content_block_start, content_block_delta
-  (delta.type == "text_delta"), content_block_stop, message_delta
-  (delta.stop_reason), message_stop, ping, error.
+  SSE events: message_start (message.model, message.usage), content_block_start,
+  content_block_delta (text_delta; thinking_delta etc. are not displayed),
+  content_block_stop, message_delta (delta.stop_reason, usage.output_tokens),
+  message_stop, ping, error. Other event types are treated as keep-alives.
 """
 
 from __future__ import annotations
@@ -27,6 +37,7 @@ from typing import IO, Callable, Iterator
 from .base import (
     Heartbeat,
     ProviderError,
+    ResponseStart,
     StreamEnd,
     StreamEvent,
     TextDelta,
@@ -35,7 +46,8 @@ from .base import (
 
 API_VERSION = "2023-06-01"
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
-MAX_ATTEMPTS = 3
+# Hard ceiling on automatic retries per user message (AIWS_MAX_RETRIES <= this).
+MAX_RETRIES_CAP = 3
 MAX_RETRY_WAIT_S = 10.0
 READ_TIMEOUT_S = 30.0
 
@@ -140,16 +152,20 @@ class AnthropicProvider:
         api_key: str,
         model: str,
         base_url: str = "https://api.anthropic.com",
-        fallbacks: str = "default",
+        fallbacks: str = "off",
+        max_retries: int = 2,
         opener: Opener = _default_opener,
         sleep: Callable[[float], None] = time.sleep,
     ):
         if not api_key:
             raise ValueError("api_key is required")
+        if not 0 <= max_retries <= MAX_RETRIES_CAP:
+            raise ValueError(f"max_retries must be between 0 and {MAX_RETRIES_CAP}")
         self._api_key = api_key
         self.model = model
         self._url = base_url.rstrip("/") + "/v1/messages"
         self._fallbacks = fallbacks
+        self._max_retries = max_retries
         self._open = opener
         self._sleep = sleep
 
@@ -159,6 +175,8 @@ class AnthropicProvider:
     def _request(
         self, system: str, turns: list[Turn], max_tokens: int
     ) -> urllib.request.Request:
+        # The standard, non-beta Messages request. No thinking/effort/tools
+        # parameters are sent, so the model's own defaults apply.
         body: dict[str, object] = {
             "model": self.model,
             "max_tokens": max_tokens,
@@ -174,9 +192,9 @@ class AnthropicProvider:
             "anthropic-version": API_VERSION,
         }
         if self._fallbacks == "default":
-            # Re-runs a classifier-declined request on Anthropic's recommended
-            # fallback model inside the same call. Disable with
-            # AIWS_ANTHROPIC_FALLBACKS=off if the account rejects the beta.
+            # Opt-in beta (AIWS_ANTHROPIC_FALLBACKS=default): re-runs a
+            # classifier-declined request on Anthropic's recommended fallback
+            # model inside the same call. Off by default.
             body["fallbacks"] = "default"
             headers["anthropic-beta"] = FALLBACK_BETA
         return urllib.request.Request(
@@ -189,11 +207,16 @@ class AnthropicProvider:
     def _open_with_retry(
         self, req: urllib.request.Request, cancel: threading.Event, deadline: float
     ) -> IO[bytes]:
-        for attempt in range(1, MAX_ATTEMPTS + 1):
+        """Open the stream. Retries happen only when the API rejected the request
+        (429/5xx/529 status) or the connection was never established, so at most
+        one attempt per user message can generate (and bill) output."""
+        attempts = 1 + self._max_retries
+        for attempt in range(1, attempts + 1):
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise ProviderError("timeout", _FRIENDLY["timeout"])
             retry_after: float | None = None
+            safe_to_retry = False
             try:
                 return self._open(req, min(READ_TIMEOUT_S, remaining))
             except urllib.error.HTTPError as exc:
@@ -204,6 +227,7 @@ class AnthropicProvider:
                 finally:
                     exc.close()
                 err = _error_from_body(exc.code, body)
+                safe_to_retry = err.retryable
                 header = exc.headers.get("retry-after") if exc.headers else None
                 try:
                     retry_after = float(header) if header else None
@@ -211,9 +235,15 @@ class AnthropicProvider:
                     retry_after = None
             except (TimeoutError, socket.timeout):
                 err = ProviderError("timeout", _FRIENDLY["timeout"])
-            except (urllib.error.URLError, OSError):
+            except urllib.error.URLError as exc:
                 err = ProviderError("network", _FRIENDLY["network"])
-            if not err.retryable or attempt == MAX_ATTEMPTS or cancel.is_set():
+                # DNS failure or refused connection: the request never left.
+                safe_to_retry = isinstance(
+                    exc.reason, (ConnectionRefusedError, socket.gaierror)
+                )
+            except OSError:
+                err = ProviderError("network", _FRIENDLY["network"])
+            if not safe_to_retry or attempt == attempts or cancel.is_set():
                 raise err
             wait = min(
                 retry_after if retry_after is not None else 0.5 * 2**attempt,
@@ -236,11 +266,12 @@ class AnthropicProvider:
             self._request(system, turns, max_tokens), cancel, deadline
         )
         stop_reason = ""
+        output_tokens: int | None = None
         finished = False
         try:
             for event, data in iter_sse(resp):
                 if cancel.is_set():
-                    yield StreamEnd("cancelled")
+                    yield StreamEnd("cancelled", output_tokens)
                     return
                 if time.monotonic() > deadline:
                     raise ProviderError("timeout", _FRIENDLY["timeout"])
@@ -250,26 +281,44 @@ class AnthropicProvider:
                     payload = json.loads(data)
                 except ValueError as exc:
                     raise ProviderError("protocol", _FRIENDLY["protocol"]) from exc
+                if not isinstance(payload, dict):
+                    raise ProviderError("protocol", _FRIENDLY["protocol"])
                 kind = payload.get("type", event)
                 if kind == "error":
                     raise _error_from_body(None, data.encode("utf-8"))
-                if kind == "content_block_delta":
+                if kind == "message_start":
+                    message = payload.get("message") or {}
+                    usage = message.get("usage") or {}
+                    output_tokens = _int_or_none(usage.get("output_tokens"))
+                    yield ResponseStart(
+                        model=message.get("model") or None,
+                        input_tokens=_int_or_none(usage.get("input_tokens")),
+                    )
+                elif kind == "content_block_delta":
                     delta = payload.get("delta") or {}
-                    if delta.get("type") == "text_delta":
-                        text = delta.get("text", "")
-                        if text:
-                            yield TextDelta(text)
-                            continue
-                    yield Heartbeat()
+                    text = (
+                        delta.get("text", "")
+                        if delta.get("type") == "text_delta"
+                        else ""
+                    )
+                    # thinking_delta / signature_delta / input_json_delta are not
+                    # shown or stored; they only prove the stream is alive.
+                    yield TextDelta(text) if text else Heartbeat()
                 elif kind == "message_delta":
-                    stop_reason = (payload.get("delta") or {}).get(
-                        "stop_reason"
-                    ) or stop_reason
+                    delta = payload.get("delta") or {}
+                    stop_reason = delta.get("stop_reason") or stop_reason
+                    usage = payload.get("usage") or {}
+                    # Keep the latest figure the API reports for this message.
+                    output_tokens = (
+                        _int_or_none(usage.get("output_tokens")) or output_tokens
+                    )
                     yield Heartbeat()
                 elif kind == "message_stop":
                     finished = True
                     break
                 else:
+                    # ping, content_block_start/stop (text, thinking,
+                    # redacted_thinking) and any event type added later.
                     yield Heartbeat()
         except (TimeoutError, socket.timeout) as exc:
             raise ProviderError("timeout", _FRIENDLY["timeout"]) from exc
@@ -283,4 +332,8 @@ class AnthropicProvider:
             raise ProviderError(
                 "protocol", "The response from the model provider ended early."
             )
-        yield StreamEnd(stop_reason or "end_turn")
+        yield StreamEnd(stop_reason or "end_turn", output_tokens)
+
+
+def _int_or_none(value: object) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) else None

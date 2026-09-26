@@ -84,7 +84,11 @@ class App:
             "provider": self.provider.name,
             "model": self.provider.model,
             "simulated": self.provider.simulated,
+            "fallbacks": self.settings.anthropic_fallbacks
+            if self.provider.name == "anthropic"
+            else "off",
             "limits": {
+                "max_retries": self.settings.max_retries,
                 "max_message_chars": self.settings.max_message_chars,
                 "max_output_tokens": self.settings.max_output_tokens,
                 "rate_limit_per_minute": self.settings.rate_limit_per_minute,
@@ -259,8 +263,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def _create_conversation(self) -> None:
         title = DEFAULT_TITLE
-        if int(self.headers.get("Content-Length", "0") or 0) > 0:
-            data = self._read_json()
+        if self.headers.get("Content-Length", "0").strip() not in {"", "0"}:
+            data = self._read_json()  # validates Content-Length and type
             if "title" in data:
                 title = validate_title(data["title"], self.app.settings.max_title_chars)
         conv = self.app.store.create_conversation(title)
@@ -321,6 +325,14 @@ class Handler(BaseHTTPRequestHandler):
             self.app.chat.reply(cid, text, emit, ping)
         except Busy:
             emit("error", {"message": "A reply is already being generated."})
+        except OSError:
+            pass  # client disconnected
+        except Exception as exc:  # noqa: BLE001 - headers are already sent
+            log.error("unexpected error before reply: %s", type(exc).__name__)
+            try:
+                emit("error", {"message": "Unexpected server error."})
+            except OSError:
+                pass
 
 
 class _Server(ThreadingHTTPServer):

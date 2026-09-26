@@ -64,8 +64,11 @@ class Settings:
     anthropic_api_key: str = field(default="", repr=False)
     anthropic_base_url: str = "https://api.anthropic.com"
     anthropic_model: str = "claude-opus-5"
-    # Server-side refusal fallbacks (beta). "default" or "off".
-    anthropic_fallbacks: str = "default"
+    # Server-side refusal fallbacks (beta, opt-in). "off" or "default".
+    anthropic_fallbacks: str = "off"
+    # Automatic retries per message, only for requests the API rejected
+    # before generating (429/5xx/529) or that never connected.
+    max_retries: int = 2
 
     max_message_chars: int = 16_000
     max_output_tokens: int = 16_000
@@ -102,9 +105,7 @@ def load_settings(
     if provider not in {"auto", "anthropic", "demo"}:
         raise ValueError("AIWS_PROVIDER must be auto, anthropic or demo")
 
-    fallbacks = (
-        env.get("AIWS_ANTHROPIC_FALLBACKS", "default").strip().lower() or "default"
-    )
+    fallbacks = env.get("AIWS_ANTHROPIC_FALLBACKS", "off").strip().lower() or "off"
     if fallbacks not in {"default", "off"}:
         raise ValueError("AIWS_ANTHROPIC_FALLBACKS must be default or off")
 
@@ -124,6 +125,7 @@ def load_settings(
         ).rstrip("/"),
         anthropic_model=env.get("AIWS_MODEL", "").strip() or "claude-opus-5",
         anthropic_fallbacks=fallbacks,
+        max_retries=_int(env, "AIWS_MAX_RETRIES", 2, 0, 3),
         max_message_chars=_int(env, "AIWS_MAX_MESSAGE_CHARS", 16_000, 1, 200_000),
         max_output_tokens=_int(env, "AIWS_MAX_OUTPUT_TOKENS", 16_000, 1, 128_000),
         max_context_chars=_int(
