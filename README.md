@@ -1,6 +1,18 @@
 # Avid-aa
 
-Two independent security projects.
+Independent projects, each in its own directory.
+
+## [`aiworkspace/`](aiworkspace/README.md) — local AI chat workspace
+
+A single-user, localhost-only chat workspace with streamed replies, saved
+conversation history, and Hebrew/English (RTL/LTR) support. Phase 1 of a
+broader workspace; runs in a clearly labelled demo mode without an API key.
+
+```bash
+python -m aiworkspace   # http://127.0.0.1:8765/
+```
+
+No dependencies. [Full documentation →](aiworkspace/README.md)
 
 ## [`moat/`](moat/README.md) — security scanner for AI agent configuration
 

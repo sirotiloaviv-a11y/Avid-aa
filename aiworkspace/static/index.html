@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en" dir="ltr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="referrer" content="no-referrer" />
+    <title>AI Workspace</title>
+    <link rel="icon" href="/static/icon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/static/styles.css" />
+    <script type="module" src="/static/app.js"></script>
+  </head>
+  <body>
+    <div class="app" id="app">
+      <aside class="sidebar" id="sidebar" aria-label="Conversations">
+        <div class="sidebar-head">
+          <span class="brand" id="brand"></span>
+          <button type="button" class="btn btn-primary" id="new-chat"></button>
+        </div>
+        <nav class="conv-nav">
+          <h2 class="section-label" id="conv-heading"></h2>
+          <div id="conv-state" class="conv-state" role="status"></div>
+          <ul class="conv-list" id="conv-list"></ul>
+        </nav>
+        <div class="sidebar-foot">
+          <span class="muted small" id="local-only"></span>
+          <button type="button" class="btn btn-ghost small" id="lang-toggle"></button>
+        </div>
+      </aside>
+      <div class="scrim" id="scrim" hidden></div>
+
+      <main class="main">
+        <header class="topbar">
+          <button type="button" class="btn btn-ghost icon-btn menu-btn" id="menu-btn">
+            <span aria-hidden="true">☰</span>
+          </button>
+          <h1 class="conv-title" id="conv-title" dir="auto"></h1>
+          <span class="mode-badge" id="mode-badge" hidden></span>
+        </header>
+        <div class="demo-banner" id="demo-banner" role="note" hidden></div>
+
+        <section class="messages" id="messages" aria-live="polite" aria-busy="false"></section>
+
+        <div class="alert" id="alert" role="alert" hidden>
+          <span id="alert-text"></span>
+          <button type="button" class="btn btn-ghost small" id="alert-close" aria-label="Dismiss">✕</button>
+        </div>
+
+        <form class="composer" id="composer" autocomplete="off">
+          <label class="visually-hidden" for="input" id="input-label"></label>
+          <textarea id="input" rows="1" dir="auto" spellcheck="true"></textarea>
+          <div class="composer-bar">
+            <span class="counter small" id="counter" aria-live="polite"></span>
+            <button type="submit" class="btn btn-primary" id="send"></button>
+            <button type="button" class="btn btn-danger" id="stop" hidden></button>
+          </div>
+        </form>
+      </main>
+    </div>
+  </body>
+</html>
