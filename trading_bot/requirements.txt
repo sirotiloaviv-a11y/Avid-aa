@@ -1,0 +1,6 @@
+ccxt
+python-telegram-bot
+fastapi
+uvicorn
+requests
+pandas

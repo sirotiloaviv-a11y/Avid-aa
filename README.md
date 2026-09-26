@@ -21,3 +21,8 @@ No dependencies. Emits SARIF for GitHub code scanning.
 Monitors Hebrew-language news and Telegram sources for security events, matches
 them against a keyword ruleset that handles Hebrew prefixes, suffixes and
 niqqud, and dispatches alerts.
+
+## [`trading_bot/`](trading_bot/README.md) — Prop Firm algorithmic trading bot
+
+TradingView webhook → risk-checked position sizing → ccxt execution → Telegram
+reports, for a $1,000,000 funded account with a 1.5% daily loss limit.
