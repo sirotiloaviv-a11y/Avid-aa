@@ -5,6 +5,7 @@ Run with:  python main.py
 
 import hmac
 import logging
+from typing import Optional
 
 import uvicorn
 from fastapi import FastAPI, HTTPException
@@ -19,9 +20,9 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 log = logging.getLogger("trading_bot")
 
 app = FastAPI(title="Prop Firm Trading Bot")
-risk = RiskManager()
 executor = OrderExecutor()
 reporter = TelegramReporter()
+risk = RiskManager(executor=executor, alert=reporter.send)
 
 
 class Signal(BaseModel):
@@ -31,12 +32,17 @@ class Signal(BaseModel):
     symbol: str
     side: str          # "buy" or "sell"
     entry: float
-    stop: float
+    stop: Optional[float] = None   # required in practice: RiskManager rejects trades without it
 
 
 @app.get("/health")
 def health() -> dict:
-    return {"status": "ok", "dry_run": executor.dry_run, "daily_pnl": risk.daily_pnl}
+    return {
+        "status": "ok",
+        "dry_run": executor.dry_run,
+        "daily_pnl": risk.daily_pnl,
+        "kill_switch_active": risk.kill_switch_active,
+    }
 
 
 @app.post("/webhook")
@@ -44,9 +50,10 @@ def webhook(signal: Signal) -> dict:
     if not hmac.compare_digest(signal.secret, config.TRADINGVIEW_WEBHOOK_SECRET):
         raise HTTPException(status_code=401, detail="invalid secret")
 
-    if not risk.can_trade():
-        reporter.send(f"Signal ignored: daily loss limit reached ({signal.side} {signal.symbol})")
-        return {"status": "blocked", "reason": "daily loss limit"}
+    allowed, reason = risk.can_execute_trade(signal.side, signal.entry, signal.stop)
+    if not allowed:
+        reporter.send(f"Signal rejected: {reason} ({signal.side} {signal.symbol})")
+        return {"status": "rejected", "reason": reason}
 
     size = risk.position_size(signal.entry, signal.stop)
     order = executor.market_order(signal.symbol, signal.side, size)

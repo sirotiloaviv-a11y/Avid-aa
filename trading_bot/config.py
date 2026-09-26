@@ -5,6 +5,7 @@ yourself) and fall back to placeholders. Never hardcode real keys here.
 """
 
 import os
+from pathlib import Path
 
 
 def _env(name: str, default: str) -> str:
@@ -29,6 +30,8 @@ TELEGRAM_CHAT_ID = _env("TELEGRAM_CHAT_ID", "YOUR_TELEGRAM_CHAT_ID")
 ACCOUNT_BALANCE = 1000000          # USD, starting balance of the funded account
 MAX_DAILY_LOSS_PCT = 1.5           # % of ACCOUNT_BALANCE; trading halts once hit
 MAX_RISK_PER_TRADE_PCT = 0.25      # % of ACCOUNT_BALANCE risked per trade
+# Daily P&L + kill switch, persisted across restarts; resets at 00:00 UTC.
+DAILY_STATE_FILE = _env("DAILY_STATE_FILE", str(Path(__file__).with_name("daily_state.json")))
 
 # --- Execution ------------------------------------------------------------
 # Paper-trade by default; set DRY_RUN=false only when you mean it.

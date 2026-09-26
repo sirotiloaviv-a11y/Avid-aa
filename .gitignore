@@ -19,3 +19,7 @@ venv/
 *.egg-info/
 moat.sarif
 .moat-baseline.json
+
+# trading_bot runtime state
+trading_bot/daily_state.json
+trading_bot/daily_state.json.tmp
