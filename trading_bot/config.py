@@ -25,6 +25,11 @@ WEBHOOK_PORT = int(_env("WEBHOOK_PORT", "8000"))
 # --- Telegram -------------------------------------------------------------
 TELEGRAM_BOT_TOKEN = _env("TELEGRAM_BOT_TOKEN", "YOUR_TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = _env("TELEGRAM_CHAT_ID", "YOUR_TELEGRAM_CHAT_ID")
+# Dashboard buttons: Telegram POSTs updates to TELEGRAM_WEBHOOK_URL (public HTTPS
+# URL of this server's /telegram/webhook) with TELEGRAM_WEBHOOK_SECRET in a header.
+# Only TELEGRAM_CHAT_ID may use the buttons.
+TELEGRAM_WEBHOOK_URL = _env("TELEGRAM_WEBHOOK_URL", "")
+TELEGRAM_WEBHOOK_SECRET = _env("TELEGRAM_WEBHOOK_SECRET", "YOUR_TELEGRAM_WEBHOOK_SECRET")
 
 # --- Risk limits (Prop Firm account) -------------------------------------
 ACCOUNT_BALANCE = 1000000          # USD, starting balance of the funded account

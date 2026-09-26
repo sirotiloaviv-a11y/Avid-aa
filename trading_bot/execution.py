@@ -39,29 +39,31 @@ class OrderExecutor:
         params = {"reduceOnly": True} if reduce_only else {}
         return self.exchange.create_order(symbol, "market", side, amount, None, params)
 
+    def get_open_positions(self) -> list[dict]:
+        """Open positions as ccxt-style dicts: symbol, side ('long'/'short'),
+        contracts, plus entryPrice / unrealizedPnl when the exchange reports them."""
+        if self.dry_run:
+            return [
+                {"symbol": s, "side": "long" if q > 0 else "short", "contracts": abs(q)}
+                for s, q in self._sim_positions.items()
+            ]
+        return [p for p in self.exchange.fetch_positions() if abs(float(p.get("contracts") or 0)) > 0]
+
     def close_all_positions(self) -> list[dict]:
         """Cancel all open orders and market-close every open position.
 
         Keeps going past individual failures so one bad symbol can't leave the
         rest of the book open. Returns one result dict per position.
         """
-        if self.dry_run:
-            positions = [
-                {"symbol": s, "side": "long" if q > 0 else "short", "contracts": abs(q)}
-                for s, q in self._sim_positions.items()
-            ]
-        else:
+        if not self.dry_run:
             try:
                 self.exchange.cancel_all_orders()
             except Exception as exc:  # not every exchange supports a global cancel
                 log.warning("cancel_all_orders failed: %s", exc)
-            positions = self.exchange.fetch_positions()
 
         results = []
-        for pos in positions:
+        for pos in self.get_open_positions():
             amount = abs(float(pos.get("contracts") or 0))
-            if amount == 0:
-                continue
             symbol = pos["symbol"]
             close_side = "sell" if pos.get("side") == "long" else "buy"
             try:

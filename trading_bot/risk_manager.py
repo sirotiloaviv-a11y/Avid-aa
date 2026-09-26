@@ -1,13 +1,19 @@
 """Position sizing, daily stop-loss, and the emergency kill switch.
 
-Daily state (P&L and kill switch) is persisted to a JSON file so a restart
-never hands the bot a fresh loss budget mid-day. Both reset at 00:00 UTC.
+Daily state (P&L, trade stats and kill switch) is persisted to a JSON file so
+a restart never hands the bot a fresh loss budget mid-day. It all resets at
+00:00 UTC.
+
+Public methods are serialized with a lock: the TradingView webhook, Telegram
+buttons and the rollover loop in main.py call in from different threads.
 """
 
+import functools
 import json
 import logging
 import math
 import os
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -29,6 +35,14 @@ def _valid_price(value) -> bool:
     )
 
 
+def _locked(method):
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        with self._lock:
+            return method(self, *args, **kwargs)
+    return wrapper
+
+
 class RiskManager:
     def __init__(
         self,
@@ -38,6 +52,7 @@ class RiskManager:
         state_file: str = config.DAILY_STATE_FILE,
         executor=None,
         alert=None,
+        on_day_end=None,
     ):
         self.account_balance = account_balance
         self.max_daily_loss_pct = max_daily_loss_pct
@@ -45,11 +60,19 @@ class RiskManager:
         self.state_file = Path(state_file)
         self.executor = executor    # an execution.OrderExecutor; created on demand if None
         self.alert = alert          # optional callable(str), e.g. TelegramReporter.send
+        self.on_day_end = on_day_end  # optional callable(stats dict) for the finished UTC day
+        self._lock = threading.RLock()
 
         self._day = _utc_today()
-        self.daily_pnl = 0.0
-        self.kill_switch_active = False
+        self._reset_daily()
         self._load_state()
+
+    def _reset_daily(self) -> None:
+        self.daily_pnl = 0.0
+        self.peak_pnl = 0.0         # intraday high-water mark of daily_pnl, for drawdown
+        self.total_trades = 0
+        self.winning_trades = 0
+        self.kill_switch_active = False
 
     # --- persistence ------------------------------------------------------
 
@@ -68,6 +91,9 @@ class RiskManager:
 
         if state.get("date") == self._day:
             self.daily_pnl = float(state.get("daily_pnl", 0.0))
+            self.peak_pnl = float(state.get("peak_pnl", max(self.daily_pnl, 0.0)))
+            self.total_trades = int(state.get("total_trades", 0))
+            self.winning_trades = int(state.get("winning_trades", 0))
             self.kill_switch_active = bool(state.get("kill_switch_active", False))
         else:
             log.info("Stored state is from %s; starting new UTC day %s", state.get("date"), self._day)
@@ -77,6 +103,9 @@ class RiskManager:
         state = {
             "date": self._day,
             "daily_pnl": self.daily_pnl,
+            "peak_pnl": self.peak_pnl,
+            "total_trades": self.total_trades,
+            "winning_trades": self.winning_trades,
             "kill_switch_active": self.kill_switch_active,
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
@@ -86,21 +115,47 @@ class RiskManager:
         os.replace(tmp, self.state_file)
 
     def _roll_day(self) -> None:
-        """Reset daily P&L and the kill switch once the UTC date changes.
+        """Reset daily stats and the kill switch once the UTC date changes.
 
-        Called at the start of every public method, so the reset takes effect
-        on the first check after 00:00 UTC.
+        Called at the start of every public method (and periodically by
+        check_rollover), so the reset takes effect right after 00:00 UTC.
+        The finished day's stats are passed to on_day_end.
         """
         today = _utc_today()
-        if today != self._day:
-            log.info(
-                "UTC day rollover %s -> %s: resetting daily P&L (was %.2f) and kill switch (was %s)",
-                self._day, today, self.daily_pnl, self.kill_switch_active,
-            )
-            self._day = today
-            self.daily_pnl = 0.0
-            self.kill_switch_active = False
-            self._save_state()
+        if today == self._day:
+            return
+        finished = self._stats()
+        log.info(
+            "UTC day rollover %s -> %s: resetting daily P&L (was %.2f) and kill switch (was %s)",
+            self._day, today, self.daily_pnl, self.kill_switch_active,
+        )
+        self._day = today
+        self._reset_daily()
+        self._save_state()
+        if self.on_day_end is not None:
+            try:
+                self.on_day_end(finished)
+            except Exception as exc:
+                log.warning("on_day_end failed: %s", exc)
+
+    @_locked
+    def check_rollover(self) -> None:
+        self._roll_day()
+
+    def _stats(self) -> dict:
+        return {
+            "date": self._day,
+            "pnl": self.daily_pnl,
+            "total_trades": self.total_trades,
+            "win_rate": 100 * self.winning_trades / self.total_trades if self.total_trades else 0.0,
+            "current_drawdown": self.peak_pnl - self.daily_pnl,
+        }
+
+    @_locked
+    def daily_stats(self) -> dict:
+        """Today's pnl, total_trades, win_rate (%) and current_drawdown ($ below intraday peak)."""
+        self._roll_day()
+        return self._stats()
 
     # --- daily loss tracking ---------------------------------------------
 
@@ -109,25 +164,32 @@ class RiskManager:
         """Daily loss limit in account currency (e.g. $15,000 on $1M at 1.5%)."""
         return self.account_balance * self.max_daily_loss_pct / 100
 
+    @_locked
     def record_pnl(self, pnl: float) -> None:
-        """Add a realized P&L amount (negative for a loss) to today's total.
+        """Record one closed trade's realized P&L (negative for a loss).
 
         Breaching the daily loss limit fires the emergency kill switch.
         """
         self._roll_day()
         self.daily_pnl += pnl
+        self.peak_pnl = max(self.peak_pnl, self.daily_pnl)
+        self.total_trades += 1
+        if pnl > 0:
+            self.winning_trades += 1
         self._save_state()
         if self.daily_pnl <= -self.max_daily_loss and not self.kill_switch_active:
             self.trigger_emergency_kill_switch(
                 f"daily loss limit breached: {self.daily_pnl:,.2f} <= -{self.max_daily_loss:,.2f}"
             )
 
+    @_locked
     def daily_limit_hit(self) -> bool:
         self._roll_day()
         return self.daily_pnl <= -self.max_daily_loss
 
     # --- pre-trade checks --------------------------------------------------
 
+    @_locked
     def can_execute_trade(self, side: str, entry_price, stop_price) -> tuple[bool, str]:
         """Return (allowed, reason). Every trade must carry a valid stop-loss:
         a positive finite price on the losing side of the entry."""
@@ -150,6 +212,7 @@ class RiskManager:
             return False, "stop-loss must be above entry for a sell"
         return True, "ok"
 
+    @_locked
     def position_size(self, entry_price: float, stop_price: float) -> float:
         """Units to buy/sell so that hitting the stop loses MAX_RISK_PER_TRADE_PCT.
 
@@ -169,6 +232,7 @@ class RiskManager:
 
     # --- emergency ---------------------------------------------------------
 
+    @_locked
     def trigger_emergency_kill_switch(self, reason: str = "manual trigger") -> list:
         """Block all trading for the rest of the UTC day and flatten every open position.
 
