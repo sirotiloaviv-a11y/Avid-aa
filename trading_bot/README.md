@@ -39,6 +39,8 @@ Send `/menu` (or `/start`) to the bot to get the dashboard:
 [ 🛡️ סטטוס סיכון ]     [ 🚨 KILL-SWITCH חירום ]
 ```
 
+![Dashboard preview](docs/dashboard_preview.png)
+
 - **PNL** — today's P&L, the $1,000,000 base balance, and equity.
 - **POSITIONS** — open positions (symbol, side, size, entry, unrealized P&L).
 - **RISK** — daily loss vs. the 1.5% ($15,000) limit, and kill-switch status.
