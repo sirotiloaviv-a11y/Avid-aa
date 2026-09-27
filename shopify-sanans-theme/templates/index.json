@@ -1,0 +1,147 @@
+{
+  "sections": {
+    "hero": {
+      "type": "sanans-hero",
+      "settings": {}
+    },
+    "categories": {
+      "type": "sanans-categories",
+      "settings": {},
+      "blocks": {
+        "categories_1": {
+          "type": "category",
+          "settings": {
+            "title": "מזווה",
+            "emoji": "🍚",
+            "color": "#FFF4DC"
+          }
+        },
+        "categories_2": {
+          "type": "category",
+          "settings": {
+            "title": "חלב וביצים",
+            "emoji": "🥛",
+            "color": "#EAF2FF"
+          }
+        },
+        "categories_3": {
+          "type": "category",
+          "settings": {
+            "title": "ממרחים ומתוקים",
+            "emoji": "🍫",
+            "color": "#F6ECE6"
+          }
+        },
+        "categories_4": {
+          "type": "category",
+          "settings": {
+            "title": "פירות וירקות",
+            "emoji": "🥕",
+            "color": "#E7F6EE"
+          }
+        },
+        "categories_5": {
+          "type": "category",
+          "settings": {
+            "title": "לחם ומאפים",
+            "emoji": "🥖",
+            "color": "#FDF1E3"
+          }
+        },
+        "categories_6": {
+          "type": "category",
+          "settings": {
+            "title": "משקאות",
+            "emoji": "🧃",
+            "color": "#FFF0F2"
+          }
+        },
+        "categories_7": {
+          "type": "category",
+          "settings": {
+            "title": "חירום ומוצרי יסוד",
+            "emoji": "🔦",
+            "color": "#EEF2FA"
+          }
+        },
+        "categories_8": {
+          "type": "category",
+          "settings": {
+            "title": "ניקיון ובית",
+            "emoji": "🧽",
+            "color": "#EAF7F8"
+          }
+        }
+      },
+      "block_order": [
+        "categories_1",
+        "categories_2",
+        "categories_3",
+        "categories_4",
+        "categories_5",
+        "categories_6",
+        "categories_7",
+        "categories_8"
+      ]
+    },
+    "deals": {
+      "type": "sanans-deals",
+      "settings": {}
+    },
+    "featured": {
+      "type": "sanans-featured-products",
+      "settings": {}
+    },
+    "trust": {
+      "type": "sanans-trust",
+      "settings": {},
+      "blocks": {
+        "trust_1": {
+          "type": "item",
+          "settings": {
+            "icon": "truck",
+            "title": "משלוח עד הבית, עוד היום",
+            "text": "מזמינים עד 14:00 — מקבלים עוד היום. בחרו חלון זמן שנוח לכם."
+          }
+        },
+        "trust_2": {
+          "type": "item",
+          "settings": {
+            "icon": "leaf",
+            "title": "טריות מובטחת",
+            "text": "חלב, ביצים ומוצרים טריים נאספים מהמדף רק לפני היציאה אליכם, בשרשרת קירור מלאה."
+          }
+        },
+        "trust_3": {
+          "type": "item",
+          "settings": {
+            "icon": "shield",
+            "title": "לא מרוצים? מחזירים כסף",
+            "text": "מוצר לא הגיע כמו שציפיתם? נזכה אתכם במלואו, בלי שאלות ובלי ויכוחים."
+          }
+        },
+        "trust_4": {
+          "type": "item",
+          "settings": {
+            "icon": "headset",
+            "title": "אנשים אמיתיים בשירות",
+            "text": "צוות מהשכונה זמין בוואטסאפ ובטלפון — עונים מהר ופותרים עוד יותר מהר."
+          }
+        }
+      },
+      "block_order": [
+        "trust_1",
+        "trust_2",
+        "trust_3",
+        "trust_4"
+      ]
+    }
+  },
+  "order": [
+    "hero",
+    "categories",
+    "deals",
+    "featured",
+    "trust"
+  ]
+}
