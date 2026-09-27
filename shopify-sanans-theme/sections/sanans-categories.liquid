@@ -1,0 +1,71 @@
+{%- comment -%} סנאנס — קטגוריות מהירות בעיגולים {%- endcomment -%}
+<section class="sn-section sn-container">
+  {%- if section.settings.heading != blank -%}
+    <div class="sn-section__head">
+      <h2 class="sn-section__title">{{ section.settings.heading }}</h2>
+    </div>
+  {%- endif -%}
+
+  <ul class="sn-cats">
+    {%- for block in section.blocks -%}
+      {%- liquid
+        assign cat = block.settings.collection
+        assign cat_title = block.settings.title | default: cat.title
+        assign cat_url = block.settings.link | default: cat.url | default: routes.all_products_collection_url
+        assign cat_image = block.settings.image | default: cat.featured_image
+      -%}
+      <li class="sn-cat" {{ block.shopify_attributes }}>
+        <a href="{{ cat_url }}">
+          <span class="sn-cat__circle" style="--sn-cat-bg: {{ block.settings.color }};">
+            {%- if cat_image -%}
+              {{ cat_image | image_url: width: 240 | image_tag: loading: 'lazy', alt: '' }}
+            {%- else -%}
+              <span aria-hidden="true">{{ block.settings.emoji }}</span>
+            {%- endif -%}
+          </span>
+          <span class="sn-cat__title">{{ cat_title }}</span>
+        </a>
+      </li>
+    {%- endfor -%}
+  </ul>
+</section>
+
+{% schema %}
+{
+  "name": "סנאנס — קטגוריות",
+  "tag": "div",
+  "settings": [
+    { "type": "text", "id": "heading", "label": "כותרת", "default": "מה בא לכם למלא היום?" }
+  ],
+  "blocks": [
+    {
+      "type": "category",
+      "name": "קטגוריה",
+      "settings": [
+        { "type": "collection", "id": "collection", "label": "קולקציה" },
+        { "type": "text", "id": "title", "label": "שם (אם ריק — שם הקולקציה)" },
+        { "type": "url", "id": "link", "label": "קישור חלופי" },
+        { "type": "image_picker", "id": "image", "label": "תמונה / אייקון (PNG שקוף)" },
+        { "type": "text", "id": "emoji", "label": "אימוג'י (כשאין תמונה)", "default": "🛒" },
+        { "type": "color", "id": "color", "label": "צבע רקע לעיגול", "default": "#F6F8FB" }
+      ]
+    }
+  ],
+  "max_blocks": 12,
+  "presets": [
+    {
+      "name": "סנאנס — קטגוריות",
+      "blocks": [
+        { "type": "category", "settings": { "title": "מזווה", "emoji": "🍚", "color": "#FFF4DC" } },
+        { "type": "category", "settings": { "title": "חלב וביצים", "emoji": "🥛", "color": "#EAF2FF" } },
+        { "type": "category", "settings": { "title": "ממרחים ומתוקים", "emoji": "🍫", "color": "#F6ECE6" } },
+        { "type": "category", "settings": { "title": "פירות וירקות", "emoji": "🥕", "color": "#E7F6EE" } },
+        { "type": "category", "settings": { "title": "לחם ומאפים", "emoji": "🥖", "color": "#FDF1E3" } },
+        { "type": "category", "settings": { "title": "משקאות", "emoji": "🧃", "color": "#FFF0F2" } },
+        { "type": "category", "settings": { "title": "חירום ומוצרי יסוד", "emoji": "🔦", "color": "#EEF2FA" } },
+        { "type": "category", "settings": { "title": "ניקיון ובית", "emoji": "🧽", "color": "#EAF7F8" } }
+      ]
+    }
+  ]
+}
+{% endschema %}

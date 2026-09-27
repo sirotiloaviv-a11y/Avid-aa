@@ -1,0 +1,15 @@
+{%- comment -%}
+  הקובץ הזה אינו קובץ עצמאי — אלה שלוש תוספות להדבקה בתוך layout/theme.liquid הקיים של Dawn.
+{%- endcomment -%}
+
+{%- comment -%} 1) שורת <html> — החליפו את השורה הקיימת כדי להפעיל כיוון ימין-לשמאל: {%- endcomment -%}
+<html class="js" lang="{{ request.locale.iso_code }}" dir="rtl">
+
+{%- comment -%} 2) הדביקו מיד לפני </head> : {%- endcomment -%}
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700;800&family=Rubik:wght@600;700;800&display=swap" rel="stylesheet">
+{{ 'sanans-grocery.css' | asset_url | stylesheet_tag }}
+
+{%- comment -%} 3) הדביקו מיד לפני </body> : {%- endcomment -%}
+<script src="{{ 'sanans-quick-add.js' | asset_url }}" defer></script>

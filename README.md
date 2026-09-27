@@ -1,6 +1,6 @@
 # Avid-aa
 
-Two independent security projects.
+Independent projects.
 
 ## [`moat/`](moat/README.md) — security scanner for AI agent configuration
 
@@ -21,3 +21,8 @@ No dependencies. Emits SARIF for GitHub code scanning.
 Monitors Hebrew-language news and Telegram sources for security events, matches
 them against a keyword ruleset that handles Hebrew prefixes, suffixes and
 niqqud, and dispatches alerts.
+
+## [`shopify-sanans-theme/`](shopify-sanans-theme/README.md) — סנאנס, עיצוב סופרמרקט אונליין ל-Shopify
+
+סקשנים, סניפטים ו-CSS מותאמים לתבנית Dawn: Hero עם חיפוש, קטגוריות, דיל יומי,
+כרטיסי מוצר עם הוספה מהירה לעגלה ותגיות מבצע. כולל מדריך התקנה ומיקרו-קופי בעברית.

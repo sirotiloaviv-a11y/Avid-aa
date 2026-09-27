@@ -1,0 +1,81 @@
+{%- comment -%} סנאנס — יתרונות ואמון {%- endcomment -%}
+<section class="sn-section sn-container">
+  {%- if section.settings.heading != blank -%}
+    <div class="sn-section__head">
+      <h2 class="sn-section__title">{{ section.settings.heading }}</h2>
+    </div>
+  {%- endif -%}
+
+  <ul class="sn-trust">
+    {%- for block in section.blocks -%}
+      <li class="sn-trust__item" {{ block.shopify_attributes }}>
+        <span class="sn-trust__icon" aria-hidden="true">
+          {%- case block.settings.icon -%}
+            {%- when 'truck' -%}
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 17V6H2v11h2"/><path d="M14 9h4l4 4v4h-2"/><circle cx="7" cy="17.5" r="2"/><circle cx="17" cy="17.5" r="2"/><path d="M9 17.5h6"/></svg>
+            {%- when 'leaf' -%}
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 20A7 7 0 0 1 4 13c0-6 7-9 16-9 0 9-3 16-9 16Z"/><path d="M4 20c4-4 7-6 11-8"/></svg>
+            {%- when 'shield' -%}
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6l-8-3Z"/><path d="m9 12 2 2 4-4"/></svg>
+            {%- when 'headset' -%}
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14v-2a8 8 0 0 1 16 0v2"/><rect x="3" y="14" width="4" height="6" rx="1.5"/><rect x="17" y="14" width="4" height="6" rx="1.5"/><path d="M20 20a3 3 0 0 1-3 2h-3"/></svg>
+            {%- when 'clock' -%}
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+            {%- when 'card' -%}
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20M6 15h4"/></svg>
+          {%- endcase -%}
+        </span>
+        <div>
+          <h3 class="sn-trust__title">{{ block.settings.title }}</h3>
+          <p class="sn-trust__text">{{ block.settings.text }}</p>
+        </div>
+      </li>
+    {%- endfor -%}
+  </ul>
+</section>
+
+{% schema %}
+{
+  "name": "סנאנס — אמון ויתרונות",
+  "tag": "div",
+  "settings": [
+    { "type": "text", "id": "heading", "label": "כותרת", "default": "למה לקנות אצלנו?" }
+  ],
+  "blocks": [
+    {
+      "type": "item",
+      "name": "יתרון",
+      "settings": [
+        {
+          "type": "select",
+          "id": "icon",
+          "label": "אייקון",
+          "default": "truck",
+          "options": [
+            { "value": "truck", "label": "משאית משלוח" },
+            { "value": "leaf", "label": "עלה — טריות" },
+            { "value": "shield", "label": "מגן — אחריות" },
+            { "value": "headset", "label": "אוזניות — שירות" },
+            { "value": "clock", "label": "שעון — זמינות" },
+            { "value": "card", "label": "כרטיס — תשלום" }
+          ]
+        },
+        { "type": "text", "id": "title", "label": "כותרת", "default": "יתרון" },
+        { "type": "textarea", "id": "text", "label": "טקסט" }
+      ]
+    }
+  ],
+  "max_blocks": 8,
+  "presets": [
+    {
+      "name": "סנאנס — אמון ויתרונות",
+      "blocks": [
+        { "type": "item", "settings": { "icon": "truck", "title": "משלוח עד הבית, עוד היום", "text": "מזמינים עד 14:00 — מקבלים עוד היום. בחרו חלון זמן שנוח לכם." } },
+        { "type": "item", "settings": { "icon": "leaf", "title": "טריות מובטחת", "text": "חלב, ביצים ומוצרים טריים נאספים מהמדף רק לפני היציאה אליכם, בשרשרת קירור מלאה." } },
+        { "type": "item", "settings": { "icon": "shield", "title": "לא מרוצים? מחזירים כסף", "text": "מוצר לא הגיע כמו שציפיתם? נזכה אתכם במלואו, בלי שאלות ובלי ויכוחים." } },
+        { "type": "item", "settings": { "icon": "headset", "title": "אנשים אמיתיים בשירות", "text": "צוות מהשכונה זמין בוואטסאפ ובטלפון — עונים מהר ופותרים עוד יותר מהר." } }
+      ]
+    }
+  ]
+}
+{% endschema %}

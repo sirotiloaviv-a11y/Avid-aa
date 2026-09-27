@@ -1,0 +1,47 @@
+{%- comment -%} סנאנס — גריד מוצרים מומלצים עם הוספה מהירה לעגלה {%- endcomment -%}
+{%- assign featured = section.settings.collection -%}
+<section class="sn-section sn-container">
+  <div class="sn-section__head">
+    <h2 class="sn-section__title">{{ section.settings.heading }}</h2>
+    {%- if featured != blank and section.settings.show_view_all -%}
+      <a class="sn-section__link" href="{{ featured.url }}">{{ section.settings.view_all_label }} ←</a>
+    {%- endif -%}
+  </div>
+
+  <ul class="sn-grid" style="--sn-cols: {{ section.settings.columns_desktop }};">
+    {%- if featured != blank -%}
+      {%- for product in featured.products limit: section.settings.products_to_show -%}
+        <li>{% render 'sanans-product-card', product: product %}</li>
+      {%- endfor -%}
+    {%- else -%}
+      {%- for i in (1..5) -%}
+        <li>
+          <article class="sn-card">
+            <div class="sn-card__media">{{ 'product-1' | placeholder_svg_tag: 'sn-card__img' }}</div>
+            <div class="sn-card__body">
+              <span class="sn-card__vendor">מותג</span>
+              <h3 class="sn-card__title">בחרו קולקציה בהגדרות הסקשן</h3>
+              <div class="sn-card__price"><span class="sn-price">₪0.00</span></div>
+            </div>
+          </article>
+        </li>
+      {%- endfor -%}
+    {%- endif -%}
+  </ul>
+</section>
+
+{% schema %}
+{
+  "name": "סנאנס — מוצרים מומלצים",
+  "tag": "div",
+  "settings": [
+    { "type": "text", "id": "heading", "label": "כותרת", "default": "הכי נמכרים השבוע" },
+    { "type": "collection", "id": "collection", "label": "קולקציה" },
+    { "type": "range", "id": "products_to_show", "label": "מספר מוצרים", "min": 2, "max": 24, "step": 1, "default": 10 },
+    { "type": "range", "id": "columns_desktop", "label": "עמודות בדסקטופ", "min": 3, "max": 6, "step": 1, "default": 5 },
+    { "type": "checkbox", "id": "show_view_all", "label": "קישור \"לכל המוצרים\"", "default": true },
+    { "type": "text", "id": "view_all_label", "label": "טקסט הקישור", "default": "לכל המוצרים" }
+  ],
+  "presets": [{ "name": "סנאנס — מוצרים מומלצים" }]
+}
+{% endschema %}

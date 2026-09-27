@@ -1,0 +1,118 @@
+{%- comment -%} סנאנס — Hero עם חיפוש מוצרים בולט ו-CTA {%- endcomment -%}
+<section class="sn-container" id="sn-hero-{{ section.id }}">
+  <div class="sn-hero">
+    {%- if section.settings.background_image -%}
+      {{
+        section.settings.background_image
+        | image_url: width: 2000
+        | image_tag: class: 'sn-hero__bg', loading: 'eager', fetchpriority: 'high', sizes: '100vw', alt: ''
+      }}
+    {%- endif -%}
+
+    <div class="sn-hero__inner">
+      <div class="sn-hero__content">
+        {%- if section.settings.eyebrow != blank -%}
+          <span class="sn-hero__eyebrow">{{ section.settings.eyebrow }}</span>
+        {%- endif -%}
+
+        <h1 class="sn-hero__title">
+          {{ section.settings.heading }}
+          {%- if section.settings.heading_highlight != blank %}
+            <mark>{{ section.settings.heading_highlight }}</mark>
+          {%- endif -%}
+        </h1>
+
+        {%- if section.settings.text != blank -%}
+          <p class="sn-hero__text">{{ section.settings.text }}</p>
+        {%- endif -%}
+
+        {%- if section.settings.show_search -%}
+          <form action="{{ routes.search_url }}" method="get" role="search" class="sn-search">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+            <label for="sn-hero-search-{{ section.id }}" class="visually-hidden">חיפוש מוצרים</label>
+            <input
+              id="sn-hero-search-{{ section.id }}"
+              type="search"
+              name="q"
+              placeholder="{{ section.settings.search_placeholder | escape }}"
+              autocomplete="off"
+            >
+            <input type="hidden" name="type" value="product">
+            <input type="hidden" name="options[prefix]" value="last">
+            <button type="submit" class="sn-btn sn-btn--primary" aria-label="חיפוש">
+              <span>חיפוש</span>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true" style="margin:0;color:#fff;width:20px;height:20px"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+            </button>
+          </form>
+        {%- endif -%}
+
+        <div class="sn-hero__actions">
+          {%- if section.settings.button_label != blank -%}
+            <a href="{{ section.settings.button_link | default: routes.all_products_collection_url }}" class="sn-btn sn-btn--primary">
+              {{ section.settings.button_label }}
+              <span aria-hidden="true">←</span>
+            </a>
+          {%- endif -%}
+          {%- if section.settings.button2_label != blank -%}
+            <a href="{{ section.settings.button2_link | default: routes.all_products_collection_url }}" class="sn-btn sn-btn--outline">
+              {{ section.settings.button2_label }}
+            </a>
+          {%- endif -%}
+        </div>
+
+        <ul class="sn-hero__chips">
+          {%- for i in (1..3) -%}
+            {%- assign chip_key = 'chip_' | append: i -%}
+            {%- if section.settings[chip_key] != blank -%}
+              <li>{{ section.settings[chip_key] }}</li>
+            {%- endif -%}
+          {%- endfor -%}
+        </ul>
+      </div>
+
+      {%- if section.settings.image -%}
+        <div class="sn-hero__media">
+          {{
+            section.settings.image
+            | image_url: width: 1000
+            | image_tag: loading: 'eager', widths: '400, 600, 800, 1000', sizes: '(min-width: 990px) 460px, 80vw', alt: section.settings.image.alt
+          }}
+          {%- if section.settings.sticker != blank -%}
+            <span class="sn-hero__sticker">{{ section.settings.sticker }}</span>
+          {%- endif -%}
+        </div>
+      {%- endif -%}
+    </div>
+  </div>
+</section>
+
+{% schema %}
+{
+  "name": "סנאנס — Hero",
+  "tag": "div",
+  "class": "sn-section-hero",
+  "settings": [
+    { "type": "text", "id": "eyebrow", "label": "תווית עליונה", "default": "פתוחים עכשיו · משלוחים היום" },
+    { "type": "text", "id": "heading", "label": "כותרת", "default": "כל המצרכים שאתם צריכים," },
+    { "type": "text", "id": "heading_highlight", "label": "המשך כותרת (מודגש בצהוב)", "default": "עד הדלת תוך שעות" },
+    { "type": "textarea", "id": "text", "label": "טקסט משנה", "default": "מוצרי יסוד, חלב וביצים טריים ומותגים שאתם אוהבים — במחירי שכונה, בלי תורים ובלי לסחוב שקיות." },
+    { "type": "header", "content": "חיפוש" },
+    { "type": "checkbox", "id": "show_search", "label": "הצגת שורת חיפוש", "default": true },
+    { "type": "text", "id": "search_placeholder", "label": "טקסט בשורת החיפוש", "default": "מה חסר לכם היום? חלב, ביצים, אורז…" },
+    { "type": "header", "content": "כפתורים" },
+    { "type": "text", "id": "button_label", "label": "כפתור ראשי", "default": "להתחיל לקנות" },
+    { "type": "url", "id": "button_link", "label": "קישור כפתור ראשי" },
+    { "type": "text", "id": "button2_label", "label": "כפתור משני", "default": "למבצעי השבוע" },
+    { "type": "url", "id": "button2_link", "label": "קישור כפתור משני" },
+    { "type": "header", "content": "נקודות אמון קצרות" },
+    { "type": "text", "id": "chip_1", "label": "נקודה 1", "default": "משלוח באותו היום" },
+    { "type": "text", "id": "chip_2", "label": "נקודה 2", "default": "טריות מובטחת" },
+    { "type": "text", "id": "chip_3", "label": "נקודה 3", "default": "תשלום מאובטח" },
+    { "type": "header", "content": "תמונות" },
+    { "type": "image_picker", "id": "image", "label": "תמונת מוצרים (PNG שקוף מומלץ)" },
+    { "type": "text", "id": "sticker", "label": "מדבקה עגולה על התמונה", "default": "משלוח חינם מ-₪250" },
+    { "type": "image_picker", "id": "background_image", "label": "תמונת רקע (אופציונלי)" }
+  ],
+  "presets": [{ "name": "סנאנס — Hero" }]
+}
+{% endschema %}

@@ -1,0 +1,39 @@
+{%- comment -%}
+  תגיות על תמונת המוצר.
+  שימוש: {% render 'sanans-sale-badge', product: product %}
+
+  - מבצע: מחושב אוטומטית מ-"Compare at price" ומוצג כאחוז הנחה.
+  - תגית חופשית: הוסיפו למוצר Tag בפורמט  badge:1+1  או  badge:2 ב-₪20
+  - חדש: הוסיפו למוצר Tag בשם  חדש
+{%- endcomment -%}
+{%- liquid
+  assign custom_badge = blank
+  for tag in product.tags
+    if tag contains 'badge:'
+      assign custom_badge = tag | remove_first: 'badge:' | strip
+      break
+    endif
+  endfor
+-%}
+<div class="sn-card__badges">
+  {%- if product.available == false -%}
+    <span class="sn-badge sn-badge--soldout">אזל מהמלאי</span>
+  {%- else -%}
+    {%- if product.compare_at_price > product.price -%}
+      {%- liquid
+        assign saving = product.compare_at_price | minus: product.price
+        assign percent = saving | times: 100.0 | divided_by: product.compare_at_price | round
+      -%}
+      <span class="sn-badge sn-badge--sale">
+        {%- if product.price_varies -%}עד {% endif -%}
+        <bdi dir="ltr">-{{ percent }}%</bdi>
+      </span>
+    {%- endif -%}
+    {%- if custom_badge != blank -%}
+      <span class="sn-badge sn-badge--deal">{{ custom_badge }}</span>
+    {%- endif -%}
+    {%- if product.tags contains 'חדש' -%}
+      <span class="sn-badge sn-badge--new">חדש</span>
+    {%- endif -%}
+  {%- endif -%}
+</div>
