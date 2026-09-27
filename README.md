@@ -1,6 +1,6 @@
 # Avid-aa
 
-Two independent security projects.
+Independent projects: two security tools and a prop firm trading bot.
 
 ## [`moat/`](moat/README.md) — security scanner for AI agent configuration
 
@@ -21,3 +21,9 @@ No dependencies. Emits SARIF for GitHub code scanning.
 Monitors Hebrew-language news and Telegram sources for security events, matches
 them against a keyword ruleset that handles Hebrew prefixes, suffixes and
 niqqud, and dispatches alerts.
+
+## [`trading_bot/`](trading_bot/README.md) — prop firm trading bot (crypto + NQ)
+
+Autonomous trading bot for prop firm accounts. Module 1 is the fail-safe risk
+layer: daily loss and trailing drawdown halts that survive restarts, position
+sizing from stop distance, and a news blackout around high-impact releases.

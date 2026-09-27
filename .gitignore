@@ -19,3 +19,8 @@ venv/
 *.egg-info/
 moat.sarif
 .moat-baseline.json
+
+# trading_bot runtime
+trading_bot/logs/*
+!trading_bot/logs/.gitkeep
+trading_bot/state/

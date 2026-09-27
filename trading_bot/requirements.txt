@@ -1,0 +1,3 @@
+# Module 1 uses the standard library only (Python 3.10+).
+# On Windows, or a slim container without /usr/share/zoneinfo, install tzdata:
+tzdata; sys_platform == "win32"
