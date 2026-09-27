@@ -44,6 +44,17 @@ from ..config import (
 from ..utils.logger import get_logger
 from ..utils.state_store import StateStore, StateStoreError
 from ..utils.time_utils import ensure_utc, next_reset, trading_day, utc_now
+from .events import (
+    Direction,
+    DrawdownWarningEvent,
+    ExitReason,
+    HaltEvent,
+    HaltKind,
+    RiskEvent,
+    RiskEventListener,
+    TradeClosedEvent,
+    TradeOpenedEvent,
+)
 from .news_guard import NewsGuard
 from .position_sizing import (
     InstrumentSpec,
@@ -57,18 +68,17 @@ log = get_logger(__name__)
 STATE_VERSION = 1
 
 
-class HaltKind:
-    DAILY_LOSS = "daily_loss"
-    MAX_DRAWDOWN = "max_drawdown"
-    MANUAL = "manual"
-
-
 @dataclass
 class OpenTrade:
     trade_id: str
     symbol: str
     risk: float
     opened_at: str
+    direction: str | None = None
+    entry_price: float | None = None
+    stop_price: float | None = None
+    take_profit: float | None = None
+    quantity: float | None = None
 
 
 @dataclass
@@ -83,6 +93,11 @@ class AccountState:
     day_start_equity: float | None = None
     realized_pnl_today: float = 0.0
     trades_today: int = 0
+    wins_today: int = 0
+    losses_today: int = 0
+    closed_today: int = 0
+    # Daily-loss warning levels (percent of the allowance) already announced.
+    daily_warnings_sent: list[int] = field(default_factory=lambda: list[int]())
     balance: float | None = None
     equity: float | None = None
     last_update: str | None = None
@@ -108,15 +123,6 @@ class AccountState:
 
 
 @dataclass(frozen=True)
-class HaltEvent:
-    account_id: str
-    kind: str
-    reason: str
-    at: datetime
-    should_flatten: bool
-
-
-@dataclass(frozen=True)
 class RiskStatus:
     account_id: str
     trading_day: date | None
@@ -133,6 +139,12 @@ class RiskStatus:
     open_risk: float
     trades_today: int
     realized_pnl_today: float
+    wins_today: int
+    losses_today: int
+    closed_today: int
+    # Share of today's loss allowance used, 0-100+.
+    daily_loss_used_pct: float | None
+    open_trades: tuple[OpenTrade, ...]
     halted: bool
     halt_reasons: tuple[str, ...]
     should_flatten: bool
@@ -176,6 +188,7 @@ class RiskEngine:
         news_guard: NewsGuard | None = None,
         kill_switch_path: Path | None = None,
         room_usage_fraction: float = 0.8,
+        daily_warning_levels: tuple[int, ...] = (50, 80),
         clock: Callable[[], datetime] = utc_now,
     ) -> None:
         if not 0 < room_usage_fraction <= 1:
@@ -187,9 +200,11 @@ class RiskEngine:
         self.news_guard = news_guard
         self.kill_switch_path = kill_switch_path
         self.room_usage_fraction = room_usage_fraction
+        self.daily_warning_levels = tuple(sorted(lvl for lvl in daily_warning_levels if 0 < lvl < 100))
         self._clock = clock
         self._lock = threading.RLock()
         self._halt_callbacks: list[Callable[[HaltEvent], None]] = []
+        self._listeners: list[RiskEventListener] = []
         self._persist_failed = False
         # Raises StateCorruptError / StateStoreError: refusing to start beats
         # starting with a forgotten daily loss.
@@ -240,6 +255,17 @@ class RiskEngine:
         """Register a callback fired once per new halt (e.g. flatten positions)."""
         self._halt_callbacks.append(callback)
 
+    def subscribe(self, listener: RiskEventListener) -> None:
+        """Receive every risk event: trades, drawdown warnings and halts."""
+        self._listeners.append(listener)
+
+    def _publish(self, event: RiskEvent) -> None:
+        for listener in self._listeners:
+            try:
+                listener(event)
+            except Exception:
+                log.exception("[%s] Risk event listener %r failed", self.account.account_id, listener)
+
     def _emit_halt(self, kind: str, reason: str, now: datetime) -> None:
         event = HaltEvent(self.state.account_id, kind, reason, now, should_flatten=True)
         log.critical("[%s] TRADING HALTED (%s): %s", event.account_id, kind, reason)
@@ -249,6 +275,7 @@ class RiskEngine:
                 callback(event)
             except Exception:
                 log.exception("[%s] Halt callback %r failed", event.account_id, callback)
+        self._publish(event)
 
     # --------------------------------------------------------------- limits
     def _day_reference(self) -> float | None:
@@ -315,6 +342,8 @@ class RiskEngine:
         s.day_start_equity = equity
         s.realized_pnl_today = 0.0
         s.trades_today = 0
+        s.wins_today = s.losses_today = s.closed_today = 0
+        s.daily_warnings_sent = []
         s.daily_halted = False
         s.daily_halt_reason = None
         log.info(
@@ -328,6 +357,24 @@ class RiskEngine:
         if s.equity is None:
             return
         daily_floor = self.daily_loss_floor()
+        used = self._daily_loss_used_pct()
+        if used is not None and daily_floor is not None and not s.daily_halted:
+            new_levels = [lvl for lvl in self.daily_warning_levels
+                          if used >= lvl and lvl not in s.daily_warnings_sent]
+            if new_levels:
+                s.daily_warnings_sent = sorted({*s.daily_warnings_sent, *new_levels})
+            # A single drop straight through the floor gets the halt alert only.
+            if new_levels and s.equity > daily_floor:
+                self._persist()
+                reference = self._day_reference() or 0.0
+                level = max(new_levels)
+                log.warning("[%s] Daily loss at %.0f%% of allowance (warning level %d%%)",
+                            s.account_id, used, level)
+                self._publish(DrawdownWarningEvent(
+                    account_id=s.account_id, level_pct=level, used_pct=used,
+                    daily_pnl=s.equity - reference, daily_limit=reference - daily_floor,
+                    equity=s.equity, floor=daily_floor, at=now,
+                ))
         if not s.daily_halted and daily_floor is not None and s.equity <= daily_floor:
             reference = self._day_reference() or 0.0
             s.daily_halted = True
@@ -349,34 +396,93 @@ class RiskEngine:
             self._emit_halt(HaltKind.MAX_DRAWDOWN, s.max_dd_reason, now)
 
     # ------------------------------------------------------------- trades
+    def _daily_loss_used_pct(self) -> float | None:
+        reference, floor, equity = self._day_reference(), self.daily_loss_floor(), self.state.equity
+        if reference is None or floor is None or equity is None or reference <= floor:
+            return None
+        return max(0.0, (reference - equity) / (reference - floor) * 100)
+
     def record_trade_opened(
-        self, trade_id: str, symbol: str, risk: float, *, now: datetime | None = None
+        self,
+        trade_id: str,
+        symbol: str,
+        risk: float,
+        *,
+        direction: Direction | None = None,
+        entry_price: float | None = None,
+        stop_price: float | None = None,
+        take_profit: float | None = None,
+        quantity: float | Decimal | None = None,
+        now: datetime | None = None,
     ) -> None:
         """Register a filled entry. ``risk`` is the loss if its stop is hit."""
         now = ensure_utc(now) if now is not None else self._clock()
         with self._lock:
-            if trade_id in self.state.open_trades:
-                log.warning("[%s] Trade %s already recorded as open", self.state.account_id, trade_id)
+            s = self.state
+            if trade_id in s.open_trades:
+                log.warning("[%s] Trade %s already recorded as open", s.account_id, trade_id)
                 return
-            self.state.open_trades[trade_id] = OpenTrade(
-                trade_id, symbol, max(0.0, _finite("risk", risk)), now.isoformat()
+            risk = max(0.0, _finite("risk", risk))
+            s.open_trades[trade_id] = OpenTrade(
+                trade_id, symbol, risk, now.isoformat(),
+                direction=direction.value if direction else None,
+                entry_price=entry_price, stop_price=stop_price, take_profit=take_profit,
+                quantity=float(quantity) if quantity is not None else None,
             )
-            self.state.trades_today += 1
+            s.trades_today += 1
             self._persist()
             log.info("[%s] Opened %s %s risk=%.2f (trade %d/%d today)",
-                     self.state.account_id, trade_id, symbol, risk,
-                     self.state.trades_today, self.limits.max_trades_per_day)
+                     s.account_id, trade_id, symbol, risk,
+                     s.trades_today, self.limits.max_trades_per_day)
+            balance = s.balance
+        self._publish(TradeOpenedEvent(
+            account_id=self.account.account_id, trade_id=trade_id, symbol=symbol,
+            direction=direction, entry_price=entry_price, stop_price=stop_price,
+            take_profit=take_profit,
+            quantity=float(quantity) if quantity is not None else None,
+            risk_amount=risk,
+            risk_pct=risk / balance * 100 if balance else None,
+            balance=balance, at=now,
+        ))
 
-    def record_trade_closed(self, trade_id: str, realized_pnl: float) -> None:
+    def record_trade_closed(
+        self,
+        trade_id: str,
+        realized_pnl: float,
+        *,
+        exit_price: float | None = None,
+        reason: ExitReason = ExitReason.OTHER,
+        balance: float | None = None,
+        now: datetime | None = None,
+    ) -> None:
+        """Register a closed position. ``balance`` is the broker's balance after it."""
+        now = ensure_utc(now) if now is not None else self._clock()
         with self._lock:
+            s = self.state
             pnl = _finite("realized_pnl", realized_pnl)
-            trade = self.state.open_trades.pop(trade_id, None)
+            trade = s.open_trades.pop(trade_id, None)
             if trade is None:
-                log.warning("[%s] Closed unknown trade %s", self.state.account_id, trade_id)
-            self.state.realized_pnl_today += pnl
+                log.warning("[%s] Closed unknown trade %s", s.account_id, trade_id)
+            s.realized_pnl_today += pnl
+            s.closed_today += 1
+            if pnl > 0:
+                s.wins_today += 1
+            elif pnl < 0:
+                s.losses_today += 1
             self._persist()
-            log.info("[%s] Closed %s pnl=%.2f realized_today=%.2f",
-                     self.state.account_id, trade_id, pnl, self.state.realized_pnl_today)
+            log.info("[%s] Closed %s pnl=%.2f reason=%s realized_today=%.2f",
+                     s.account_id, trade_id, pnl, reason.value, s.realized_pnl_today)
+            new_balance = balance if balance is not None else s.balance
+            before = (balance - pnl) if balance is not None else s.balance
+        self._publish(TradeClosedEvent(
+            account_id=self.account.account_id, trade_id=trade_id,
+            symbol=trade.symbol if trade else None,
+            direction=Direction(trade.direction) if trade and trade.direction else None,
+            entry_price=trade.entry_price if trade else None,
+            exit_price=exit_price, realized_pnl=pnl,
+            pnl_pct=pnl / before * 100 if before else None,
+            reason=reason, balance=new_balance, at=now,
+        ))
 
     # -------------------------------------------------------- manual halts
     def halt(self, reason: str, *, now: datetime | None = None) -> None:
@@ -530,6 +636,11 @@ class RiskEngine:
             open_risk=sum(t.risk for t in s.open_trades.values()),
             trades_today=s.trades_today,
             realized_pnl_today=s.realized_pnl_today,
+            wins_today=s.wins_today,
+            losses_today=s.losses_today,
+            closed_today=s.closed_today,
+            daily_loss_used_pct=self._daily_loss_used_pct(),
+            open_trades=tuple(s.open_trades.values()),
             halted=bool(reasons),
             halt_reasons=tuple(reasons),
             should_flatten=bool(reasons),
@@ -559,6 +670,7 @@ class RiskManager:
                 news_guard=news_guard,
                 kill_switch_path=kill_switch_path,
                 room_usage_fraction=settings.risk.room_usage_fraction,
+                daily_warning_levels=settings.risk.daily_warning_levels,
                 clock=clock,
             )
             for account in settings.accounts
@@ -576,6 +688,10 @@ class RiskManager:
     def on_halt(self, callback: Callable[[HaltEvent], None]) -> None:
         for engine in self._engines.values():
             engine.on_halt(callback)
+
+    def subscribe(self, listener: RiskEventListener) -> None:
+        for engine in self._engines.values():
+            engine.subscribe(listener)
 
     def statuses(self, *, now: datetime | None = None) -> list[RiskStatus]:
         return [engine.status(now=now) for engine in self._engines.values()]

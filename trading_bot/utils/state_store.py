@@ -39,6 +39,11 @@ CREATE TABLE IF NOT EXISTS risk_events (
     message     TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_risk_events_account ON risk_events (account_id, id);
+CREATE TABLE IF NOT EXISTS kv (
+    key         TEXT PRIMARY KEY,
+    value       TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);
 """
 
 
@@ -135,6 +140,27 @@ class StateStore:
                 (account_id, limit),
             ).fetchall()
         return [RiskEventRecord(r[0], datetime.fromisoformat(r[1]), r[2], r[3]) for r in rows]
+
+    # ------------------------------------------------------------ key/value
+    def get_value(self, key: str) -> str | None:
+        """Small service bookmarks (e.g. the Telegram update offset)."""
+        with self._lock:
+            try:
+                row = self._conn.execute("SELECT value FROM kv WHERE key = ?", (key,)).fetchone()
+            except sqlite3.Error as exc:
+                raise StateStoreError(f"cannot read {key}: {exc}") from exc
+        return None if row is None else str(row[0])
+
+    def set_value(self, key: str, value: str) -> None:
+        with self._lock:
+            try:
+                self._conn.execute(
+                    "INSERT INTO kv (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) "
+                    "DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+                    (key, value, utc_now().isoformat()),
+                )
+            except sqlite3.Error as exc:
+                raise StateStoreError(f"cannot save {key}: {exc}") from exc
 
     # ------------------------------------------------------------ lifecycle
     def close(self) -> None:

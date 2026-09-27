@@ -95,6 +95,9 @@ class RiskLimits:
     # Size no trade to lose more than this share of the distance to the
     # nearest loss floor; the rest absorbs slippage on the stop.
     room_usage_fraction: float = 0.8
+    # Alert when the day's loss reaches these percents of the daily allowance
+    # (100% is the halt itself).
+    daily_warning_levels: tuple[int, ...] = (50, 80)
 
 
 @dataclass(frozen=True)
@@ -135,6 +138,23 @@ class ApiCredentials:
 
 
 @dataclass(frozen=True)
+class TelegramConfig:
+    bot_token: Secret = field(default_factory=lambda: Secret(""))
+    # Chats that receive alerts. Commands are accepted only from these chats.
+    chat_ids: tuple[str, ...] = ()
+    commands_enabled: bool = True
+    daily_summary: bool = True
+    # Send the end-of-day summary this many minutes before the daily reset,
+    # while today's numbers are still today's.
+    summary_lead_minutes: int = 1
+    api_base: str = "https://api.telegram.org"
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.bot_token) and bool(self.chat_ids)
+
+
+@dataclass(frozen=True)
 class Settings:
     environment: Environment
     accounts: tuple[AccountConfig, ...]
@@ -142,6 +162,7 @@ class Settings:
     session: SessionConfig
     news: NewsConfig
     credentials: ApiCredentials
+    telegram: TelegramConfig = field(default_factory=TelegramConfig)
     log_level: str = "INFO"
     log_dir: Path = PACKAGE_DIR / "logs"
     state_db_path: Path = PACKAGE_DIR / "state" / "bot_state.db"
@@ -274,6 +295,41 @@ def _parse_session(reader: _Reader) -> SessionConfig:
     return SessionConfig(reset_tz=tz, reset_time=reset)
 
 
+def _parse_levels(reader: _Reader, name: str, default: tuple[int, ...]) -> tuple[int, ...]:
+    levels: list[int] = []
+    for item in reader.list_(name, tuple(str(d) for d in default)):
+        try:
+            level = int(item)
+        except ValueError:
+            reader.errors.append(f"{name} entry {item!r} is not an integer")
+            continue
+        if not 0 < level < 100:
+            reader.errors.append(f"{name} entry {level} must be between 1 and 99")
+            continue
+        levels.append(level)
+    return tuple(sorted(set(levels)))
+
+
+def _parse_telegram(reader: _Reader) -> TelegramConfig:
+    token = reader.raw("TELEGRAM_BOT_TOKEN")
+    chat_ids = reader.list_("TELEGRAM_CHAT_IDS", ())
+    for chat_id in chat_ids:
+        if not re.fullmatch(r"-?\d+", chat_id):
+            reader.errors.append(f"TELEGRAM_CHAT_IDS entry {chat_id!r} must be a numeric chat id")
+    if token and not re.fullmatch(r"\d+:[A-Za-z0-9_-]{20,}", token):
+        reader.errors.append("TELEGRAM_BOT_TOKEN does not look like a BotFather token")
+    if token and not chat_ids:
+        reader.errors.append("TELEGRAM_BOT_TOKEN is set but TELEGRAM_CHAT_IDS is empty")
+    return TelegramConfig(
+        bot_token=Secret(token),
+        chat_ids=chat_ids,
+        commands_enabled=reader.bool_("TELEGRAM_COMMANDS_ENABLED", True),
+        daily_summary=reader.bool_("TELEGRAM_DAILY_SUMMARY", True),
+        summary_lead_minutes=reader.int_("TELEGRAM_SUMMARY_LEAD_MINUTES", 1, lo=1),
+        api_base=reader.raw("TELEGRAM_API_BASE", TelegramConfig.api_base).rstrip("/"),
+    )
+
+
 def settings_from_env(env: Mapping[str, str]) -> Settings:
     """Build and validate :class:`Settings` from an environment mapping."""
     r = _Reader(env)
@@ -288,6 +344,7 @@ def settings_from_env(env: Mapping[str, str]) -> Settings:
         max_trades_per_day=r.int_("MAX_TRADES_PER_DAY", 5, lo=1),
         equity_stale_seconds=r.int_("EQUITY_STALE_SECONDS", 120, lo=1),
         room_usage_fraction=r.float_("ROOM_USAGE_FRACTION", 0.8, lo=0, hi=1),
+        daily_warning_levels=_parse_levels(r, "DAILY_LOSS_WARN_LEVELS", (50, 80)),
     )
     if risk.risk_per_trade_pct > risk.daily_loss_limit_pct:
         r.errors.append("RISK_PER_TRADE_PCT must not exceed DAILY_LOSS_LIMIT_PCT")
@@ -328,6 +385,7 @@ def settings_from_env(env: Mapping[str, str]) -> Settings:
             futures_api_key=Secret(r.raw("FUTURES_API_KEY")),
             futures_api_secret=Secret(r.raw("FUTURES_API_SECRET")),
         ),
+        telegram=_parse_telegram(r),
         log_level=log_level,
         log_dir=r.path("LOG_DIR", PACKAGE_DIR / "logs"),
         state_db_path=r.path("STATE_DB_PATH", PACKAGE_DIR / "state" / "bot_state.db"),

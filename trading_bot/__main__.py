@@ -6,6 +6,8 @@
     resume ACCOUNT              clear a manual halt
     clear-drawdown ACCOUNT      clear a max-drawdown breach (after a firm reset)
     check-config                validate .env and exit
+    telegram-test               send a test message to TELEGRAM_CHAT_IDS
+    run                         run the Telegram alerts/commands service until stopped
 
 Touching ``state/KILL`` blocks new entries on every account without a restart.
 """
@@ -13,13 +15,16 @@ Touching ``state/KILL`` blocks new entries on every account without a restart.
 from __future__ import annotations
 
 import argparse
+import signal
 import sys
+import threading
 from datetime import timedelta
 from pathlib import Path
 from typing import Sequence
 
 from .config import ConfigError, Settings, load_settings
-from .risk_manager import RiskManager, RiskStatus, build_news_guard
+from .risk_manager import NewsGuard, RiskManager, RiskStatus, build_news_guard
+from .telegram_bot import TelegramApiError, TelegramClient, TelegramService
 from .utils import StateStore, StateStoreError, setup_logging
 
 
@@ -45,6 +50,38 @@ def _print_status(status: RiskStatus) -> None:
         print(f"  halted until {status.halted_until:%Y-%m-%d %H:%M} UTC")
 
 
+def _telegram_test(settings: Settings) -> int:
+    client = TelegramClient(settings.telegram.bot_token, api_base=settings.telegram.api_base)
+    ok = True
+    for chat_id in settings.telegram.chat_ids:
+        try:
+            client.send_message(chat_id, "✅ <b>Trading bot</b>: Telegram alerts are working.")
+            print(f"sent to {chat_id}")
+        except TelegramApiError as exc:
+            print(f"FAILED for {chat_id}: {exc}", file=sys.stderr)
+            ok = False
+    return 0 if ok else 1
+
+
+def _run_service(settings: Settings, manager: RiskManager, store: StateStore, news_guard: NewsGuard) -> int:
+    service = TelegramService(
+        settings, manager, store, news_guard=news_guard, kill_switch_path=_kill_switch(settings)
+    )
+    stop = threading.Event()
+    def _on_signal(_signum: int, _frame: object) -> None:
+        stop.set()
+
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        signal.signal(sig, _on_signal)
+    service.start()
+    try:
+        while not stop.wait(60):
+            news_guard.refresh()
+    finally:
+        service.stop()
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m trading_bot")
     parser.add_argument("--env-file", type=Path, default=None, help="path to .env")
@@ -52,6 +89,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     sub.add_parser("status")
     sub.add_parser("news")
     sub.add_parser("check-config")
+    sub.add_parser("telegram-test")
+    sub.add_parser("run")
     halt = sub.add_parser("halt")
     halt.add_argument("account")
     halt.add_argument("reason")
@@ -68,7 +107,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"OK: {len(settings.accounts)} account(s), environment={settings.environment.value}")
         return 0
 
-    setup_logging(settings.log_dir, settings.log_level, console=False)
+    setup_logging(settings.log_dir, settings.log_level, console=args.command == "run")
+    if args.command in ("telegram-test", "run") and not settings.telegram.enabled:
+        print("Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_IDS first.", file=sys.stderr)
+        return 2
+    if args.command == "telegram-test":
+        return _telegram_test(settings)
     try:
         store = StateStore(settings.state_db_path)
     except StateStoreError as exc:
@@ -80,6 +124,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         manager = RiskManager.from_settings(
             settings, store, news_guard=news_guard, kill_switch_path=_kill_switch(settings)
         )
+        if args.command == "run":
+            return _run_service(settings, manager, store, news_guard)
         if args.command == "status":
             for status in manager.statuses():
                 _print_status(status)

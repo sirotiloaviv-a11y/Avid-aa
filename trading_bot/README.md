@@ -1,8 +1,9 @@
 # trading_bot — prop firm trading bot (crypto + NQ futures)
 
-Built to run unattended 24/7 on a VPS. **Module 1** (this code) is the core
-infrastructure and the fail-safe risk manager. It does not place orders yet.
-The execution and strategy modules will call into it before every entry.
+Built to run unattended 24/7 on a VPS. **Module 1** is the core
+infrastructure and the fail-safe risk manager; **Module 2** is Telegram alerts
+and operator commands. It does not place orders yet. The execution and
+strategy modules will call into the risk engine before every entry.
 
 ```
 trading_bot/
@@ -11,6 +12,13 @@ trading_bot/
 │   ├── risk_engine.py          RiskEngine (one per account) + RiskManager
 │   ├── position_sizing.py      contracts / lots from stop distance
 │   └── news_guard.py           economic-calendar blackout
+├── telegram_bot/
+│   ├── api.py                  Bot API client (urllib)
+│   ├── formatter.py            events / statuses → Telegram HTML
+│   ├── notifier.py             risk-event listener, background delivery
+│   ├── commands.py             /status /news /halt /resume + polling
+│   ├── scheduler.py            end-of-day summary
+│   └── service.py              wires it all together
 ├── utils/
 │   ├── logger.py               logs/bot.log, rotated, UTC timestamps
 │   ├── state_store.py          SQLite state + risk-event audit trail
@@ -83,9 +91,58 @@ else:
 engine.record_trade_closed(order.id, realized_pnl=-310.0)
 ```
 
+## Telegram (Module 2)
+
+1. Create a bot with [@BotFather](https://t.me/BotFather) and put the token in
+   `TELEGRAM_BOT_TOKEN`.
+2. Send the bot any message, open
+   `https://api.telegram.org/bot<TOKEN>/getUpdates`, and put `message.chat.id`
+   in `TELEGRAM_CHAT_IDS`.
+3. `python -m trading_bot telegram-test`, then `python -m trading_bot run`.
+
+**Alerts** are sent automatically from risk-engine events:
+
+| Event | Contents |
+|---|---|
+| Trade entry | symbol, LONG/SHORT, entry, SL, TP (with R:R), size, risk $ and %, account |
+| Trade exit | symbol, exit price, P&L $ and %, reason (TP / SL / news halt / daily halt / manual), balance |
+| Daily drawdown | at 50% and 80% of the daily limit (`DAILY_LOSS_WARN_LEVELS`), once per day |
+| Halt | daily limit hit (100%), max drawdown, manual; says when trading resumes |
+| Daily summary | 1 minute before the reset: trades, win rate, P&L per account and total |
+
+Entry and exit alerts need the details passed to the engine:
+
+```python
+engine.record_trade_opened(order.id, "NQ", float(plan.size.total_risk),
+                           direction=Direction.LONG, entry_price=20_000,
+                           stop_price=19_985, take_profit=20_030,
+                           quantity=plan.size.quantity)
+engine.record_trade_closed(order.id, realized_pnl=-310.0, exit_price=19_985,
+                           reason=ExitReason.STOP_LOSS, balance=49_690.0)
+```
+
+**Commands**, accepted only from `TELEGRAM_CHAT_IDS` (others are ignored silently):
+
+| Command | Action |
+|---|---|
+| `/status` | P&L, open trades, daily and max drawdown for every account |
+| `/news` | next 24h of high-impact events and whether entries are blocked |
+| `/halt [reason]` | creates `state/KILL` and puts every account in manual halt (flatten) |
+| `/resume` | removes `state/KILL` and clears manual halts; daily / max-DD halts stay |
+
+Commands older than 2 minutes are not executed, and on first start any queued
+backlog is skipped, so a `/resume` sent while the bot was down never runs late.
+
+Alerts go through a background queue with retries, so Telegram being slow or
+down never blocks the risk engine. Run the Telegram service in the same
+process as the risk engines (`TelegramService(...).start()`); `run` does that
+for now, until the trading loop exists.
+
 ## Operator commands
 
 ```bash
+python -m trading_bot run                    # Telegram alerts + commands (blocks)
+python -m trading_bot telegram-test          # send a test message
 python -m trading_bot status                 # every account: P&L, floors, room, halts
 python -m trading_bot news                   # blackout state + this week's events
 python -m trading_bot halt apex_nq_1 "why"   # per-account kill switch (persists)
