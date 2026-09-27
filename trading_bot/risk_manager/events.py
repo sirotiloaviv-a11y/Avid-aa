@@ -23,6 +23,8 @@ class ExitReason(str, Enum):
     NEWS_HALT = "news_halt"
     DAILY_HALT = "daily_halt"
     MANUAL = "manual"
+    SIGNAL = "signal"          # strategy exit (FLAT signal or reversal)
+    RISK_HALT = "risk_halt"    # flattened by a max-drawdown halt
     OTHER = "other"
 
 

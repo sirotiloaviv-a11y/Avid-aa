@@ -5,20 +5,25 @@ Exactly one :class:`BotRuntime` may run per state directory. It holds
 while it is held, queue control requests instead of writing account state
 (see :mod:`trading_bot.risk_manager.controls`).
 
-The trading loop (next module) builds a runtime, starts it, and uses
-``runtime.manager`` for every risk decision.
+With ``TRADING_ENABLED=true`` it also runs the trading loop
+(:mod:`trading_bot.main`): feeds → strategy → risk engine → brokers.
 """
 
 from __future__ import annotations
 
 import threading
+import time
 from datetime import timedelta
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .config import Settings
 from .dashboard import DashboardApp, DashboardServer
 from .risk_manager import ControlPoller, NewsGuard, OperatorControls, RiskManager, build_news_guard
 from .telegram_bot import TelegramService
+
+if TYPE_CHECKING:
+    from .main import TradingLoop
 from .utils import ProcessLock, StateStore, get_logger
 
 log = get_logger(__name__)
@@ -47,6 +52,7 @@ class BotRuntime:
         *,
         enable_telegram: bool = True,
         enable_dashboard: bool = True,
+        enable_trading: bool = True,
     ) -> None:
         self.settings = settings
         self.lock = ProcessLock(lock_path(settings))
@@ -76,9 +82,20 @@ class BotRuntime:
                     stale_after=timedelta(seconds=settings.risk.equity_stale_seconds),
                 )
                 self.dashboard = DashboardServer(app, settings.dashboard.host, settings.dashboard.port)
+            self.trading: TradingLoop | None = None
+            if enable_trading and settings.trading.enabled:
+                from .main import build_trading_loop
+
+                self.trading = build_trading_loop(
+                    settings, self.manager, self.store, self.news_guard, alert=self._alert,
+                )
         except BaseException:
             self.lock.release()
             raise
+
+    def _alert(self, text: str) -> None:
+        if self.telegram is not None:
+            self.telegram.notifier.send(text)
 
     def start(self) -> None:
         # Requests left by a bot that died before applying them are expired.
@@ -88,15 +105,27 @@ class BotRuntime:
             self.telegram.start()
         if self.dashboard is not None:
             self.dashboard.start()
-        log.info("Bot runtime started: %d account(s), telegram=%s, dashboard=%s",
-                 len(self.manager), self.telegram is not None, self.dashboard is not None)
+        if self.trading is not None:
+            self.trading.start()
+        log.info("Bot runtime started: %d account(s), telegram=%s, dashboard=%s, trading=%s",
+                 len(self.manager), self.telegram is not None, self.dashboard is not None,
+                 self.trading is not None)
 
     def run_until(self, stop: threading.Event) -> None:
-        """Block, doing housekeeping, until ``stop`` is set."""
-        while not stop.wait(60):
-            self.news_guard.refresh()
+        """Run the trading loop (or just housekeeping) until ``stop`` is set."""
+        next_news = 0.0
+        while not stop.is_set():
+            if time.monotonic() >= next_news:
+                self.news_guard.refresh()
+                next_news = time.monotonic() + 60
+            if self.trading is not None:
+                self.trading.step(timeout=1.0)
+            else:
+                stop.wait(1.0)
 
     def stop(self) -> None:
+        if self.trading is not None:
+            self.trading.stop()
         if self.dashboard is not None:
             self.dashboard.stop()
         if self.telegram is not None:

@@ -1,4 +1,10 @@
 from .config import (
+    TradovateConfig,
+    TradingConfig,
+    StrategyConfig,
+    RouteConfig,
+    MarketDataSource,
+    BrokerKind,
     AccountConfig,
     ApiCredentials,
     ConfigError,
@@ -19,6 +25,12 @@ from .config import (
 )
 
 __all__ = [
+    "TradovateConfig",
+    "TradingConfig",
+    "StrategyConfig",
+    "RouteConfig",
+    "MarketDataSource",
+    "BrokerKind",
     "AccountConfig",
     "ApiCredentials",
     "ConfigError",

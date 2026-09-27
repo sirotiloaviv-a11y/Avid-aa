@@ -2,8 +2,8 @@
 
 Built to run unattended 24/7 on a VPS. **Module 1** is the core
 infrastructure and the fail-safe risk manager; **Module 2** is Telegram alerts
-and operator commands; **Module 3** is the web dashboard. It does not place
-orders yet. The execution and
+and operator commands; **Module 3** is the web dashboard; **Module 4** is the
+strategy engine, broker adapters and the trading loop. The execution and
 strategy modules will call into the risk engine before every entry.
 
 ```
@@ -20,6 +20,20 @@ trading_bot/
 │   ├── app.py                  routes, Basic auth, lockout, CSRF checks
 │   ├── server.py               threaded HTTP server + live event stream (SSE)
 │   └── static/                 index.html, app.css, app.js (no CDN, strict CSP)
+├── strategies/
+│   ├── base.py                 Strategy interface (candles/ticks → LONG/SHORT/FLAT)
+│   ├── ema_cross.py            reference strategy: EMA cross, ATR stop, R:R target
+│   ├── indicators.py, candles.py
+│   └── executor.py             signal → risk engine → brokers, reconcile, flatten
+├── brokers/
+│   ├── base.py                 Broker interface (netted positions, bracket orders)
+│   ├── paper.py                simulated fills, stops/targets on bar high/low
+│   ├── tradovate.py            futures: REST (placeOSO) + chart WebSocket
+│   ├── bybit.py                crypto: signed v5 REST + public kline WebSocket
+│   ├── marketdata.py           simulated / replay / composite feeds
+│   ├── streams.py              auto-reconnecting WebSocket stream
+│   └── http.py                 JSON REST client (reads retried, orders never)
+├── main.py                     TradingLoop + builders; `python -m trading_bot.main`
 ├── runtime.py                  BotRuntime: the one process that owns the state
 ├── telegram_bot/
 │   ├── api.py                  Bot API client (urllib)
@@ -31,7 +45,9 @@ trading_bot/
 ├── utils/
 │   ├── logger.py               logs/bot.log, rotated, UTC timestamps
 │   ├── state_store.py          SQLite state + risk-event audit trail
-│   └── time_utils.py           prop firm trading-day rollover
+│   ├── time_utils.py           prop firm trading-day rollover
+│   ├── process_lock.py         one bot process per state directory
+│   └── websocket.py            minimal RFC 6455 client (stdlib)
 ├── logs/                       bot.log (git-ignored)
 ├── state/                      bot_state.db, calendar cache, KILL (git-ignored)
 └── tests/
@@ -69,7 +85,55 @@ after the reset (FTMO convention). The daily reset time defaults to 17:00
 America/New_York (CME). Set `DAILY_RESET_TZ=UTC` and `DAILY_RESET_TIME=00:00`
 for crypto firms that reset at midnight UTC.
 
-## Using it from the trading loop
+## Trading (Module 4)
+
+```
+feed (WebSocket / simulator) ─► strategy ─► signal ─► ExecutionEngine
+                                                        │  per account, in parallel:
+                                                        ├─ already positioned? skip / reverse
+                                                        ├─ RiskEngine.plan_trade (halts, news,
+                                                        │  stale data, sizing for THIS account)
+                                                        └─ broker.place_bracket (market + stop + target)
+reconcile every ACCOUNT_POLL_SECONDS: balances → risk engine, closed positions →
+P&L + reason (TP / SL / ...) → journal → Telegram + dashboard
+halt (daily loss, max DD, kill switch) → flatten that account
+news blackout starting → flatten everything (FLATTEN_ON_NEWS)
+```
+
+**Start in paper mode.** `TRADING_ENABLED=true`, leave every route on
+`paper`, and `python -m trading_bot run`. Crypto uses real Bybit prices;
+NQ uses simulated bars unless an account is routed to Tradovate. Watch the
+dashboard for a few days before routing a real account.
+
+**Brokers.**
+
+| Broker | Asset | Environment | Notes |
+|---|---|---|---|
+| `paper` | both | local | fills at last price ± 1 tick; stops/targets from bar high/low (stop first if both) |
+| `tradovate` | NQ/MNQ | demo unless `ENVIRONMENT=live` | Apex/Topstep-style accounts; `placeOSO` bracket, `isAutomated` set |
+| `bybit` | USDT perps | testnet unless `ENVIRONMENT=live` | one-way mode, unified account; one API key per account |
+
+The Tradovate and Bybit adapters are written against the published APIs and
+tested against recorded request/response shapes, **not against the live
+venues**. Run them on demo/testnet before a funded account. DXTrade isn't
+implemented; add it by implementing the six methods of
+`brokers/base.py:Broker`.
+
+**Safety.**
+- Orders are never retried automatically, because a timeout may have filled.
+  If a matching position appears within 2 minutes, it is adopted with its stop.
+- Positions the bot didn't open trigger an alert and are left alone.
+- Stops and targets rest at the broker, so a crash doesn't leave a position
+  unprotected. SIGINT/SIGTERM stop the loop without closing positions.
+- Signals older than two bars (for example, after a feed stall) are ignored.
+  After a WebSocket reconnect, bars already seen are dropped.
+- Live trading refuses simulated or replayed market data.
+
+**Adding a strategy.** Subclass `strategies.base.Strategy`, implement
+`on_candle` (return a `Signal` with a stop, or `None`) and `warmup_bars`, and
+return it from `main.build_strategy`.
+
+## Using the risk engine from your own code
 
 ```python
 from trading_bot.config import load_settings

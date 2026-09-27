@@ -1,6 +1,7 @@
 """Operator CLI: ``python -m trading_bot <command>``.
 
-    run                         run the bot services (dashboard, Telegram, controls)
+    run                         run the bot: trading loop (if TRADING_ENABLED), dashboard,
+                                Telegram, controls
     status                      risk state of every account
     news                        upcoming high-impact events and blackout state
     kill [REASON]               emergency halt on ALL accounts (sets state/KILL)
@@ -22,9 +23,7 @@ from __future__ import annotations
 
 import argparse
 import getpass
-import signal
 import sys
-import threading
 from datetime import timedelta
 from pathlib import Path
 from typing import Sequence
@@ -39,7 +38,7 @@ from .risk_manager import (
     build_news_guard,
     submit_control,
 )
-from .runtime import AlreadyRunning, BotRuntime, kill_switch_path, lock_path
+from .runtime import kill_switch_path, lock_path
 from .telegram_bot import TelegramApiError, TelegramClient
 from .utils import ProcessLock, StateStore, StateStoreError, setup_logging
 
@@ -73,29 +72,6 @@ def _telegram_test(settings: Settings) -> int:
             print(f"FAILED for {chat_id}: {exc}", file=sys.stderr)
             ok = False
     return 0 if ok else 1
-
-
-def _run(settings: Settings) -> int:
-    try:
-        runtime = BotRuntime(settings)
-    except AlreadyRunning as exc:
-        print(f"Bot already running: {exc}", file=sys.stderr)
-        return 1
-    stop = threading.Event()
-
-    def _on_signal(_signum: int, _frame: object) -> None:
-        stop.set()
-
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        signal.signal(sig, _on_signal)
-    runtime.start()
-    if runtime.dashboard is not None:
-        print(f"Dashboard: http://{settings.dashboard.host}:{runtime.dashboard.port}")
-    try:
-        runtime.run_until(stop)
-    finally:
-        runtime.stop()
-    return 0
 
 
 def _control(settings: Settings, store: StateStore, action: ControlAction, account: str, argument: str) -> int:
@@ -150,7 +126,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 2
         return _telegram_test(settings)
     if args.command == "run":
-        return _run(settings)
+        from .main import run
+
+        return run(settings)
 
     try:
         store = StateStore(settings.state_db_path)

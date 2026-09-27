@@ -36,6 +36,8 @@ EXIT_REASON_LABELS: dict[ExitReason, str] = {
     ExitReason.NEWS_HALT: "News halt",
     ExitReason.DAILY_HALT: "Daily halt",
     ExitReason.MANUAL: "Manual",
+    ExitReason.SIGNAL: "Strategy exit",
+    ExitReason.RISK_HALT: "Risk halt",
     ExitReason.OTHER: "Other",
 }
 

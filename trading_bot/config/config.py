@@ -171,6 +171,74 @@ class DashboardConfig:
         return bool(self.password)
 
 
+class BrokerKind(str, Enum):
+    PAPER = "paper"
+    TRADOVATE = "tradovate"
+    BYBIT = "bybit"
+
+
+class MarketDataSource(str, Enum):
+    AUTO = "auto"            # venue feeds where configured, simulated otherwise
+    SIMULATED = "simulated"
+    REPLAY = "replay"
+
+
+@dataclass(frozen=True)
+class RouteConfig:
+    """Which broker trades a prop account, and under what name there."""
+
+    account_id: str
+    broker: BrokerKind
+    broker_account: str
+    # For paper routes: "futures", "crypto" or "" (both).
+    asset_class: str = ""
+
+
+@dataclass(frozen=True)
+class StrategyConfig:
+    name: str = "ema_cross"
+    symbols: tuple[str, ...] = ("NQ", "BTCUSDT")
+    timeframe_minutes: int = 5
+    ema_fast: int = 9
+    ema_slow: int = 21
+    atr_period: int = 14
+    atr_stop_mult: float = 1.5
+    reward_risk: float = 2.0
+    allow_short: bool = True
+
+
+@dataclass(frozen=True)
+class TradovateConfig:
+    username: str = ""
+    password: Secret = field(default_factory=lambda: Secret(""))
+    app_id: str = ""
+    app_version: str = "1.0"
+    cid: str = ""
+    secret: Secret = field(default_factory=lambda: Secret(""))
+    # Our symbol -> contract month, e.g. {"NQ": "NQZ6"}.
+    contracts: tuple[tuple[str, str], ...] = ()
+
+    @property
+    def configured(self) -> bool:
+        return bool(self.username and self.password and self.cid and self.secret)
+
+
+@dataclass(frozen=True)
+class TradingConfig:
+    # Off by default: `run` only monitors until this is deliberately enabled.
+    enabled: bool = False
+    strategy: StrategyConfig = field(default_factory=StrategyConfig)
+    routes: tuple[RouteConfig, ...] = ()
+    market_data: MarketDataSource = MarketDataSource.AUTO
+    replay_file: Path | None = None
+    simulated_bar_seconds: float | None = None
+    account_poll_seconds: float = 5.0
+    flatten_on_news: bool = True
+    tradovate: TradovateConfig = field(default_factory=TradovateConfig)
+    # account_id -> (api_key, api_secret)
+    bybit_keys: tuple[tuple[str, Secret, Secret], ...] = ()
+
+
 @dataclass(frozen=True)
 class Settings:
     environment: Environment
@@ -181,6 +249,7 @@ class Settings:
     credentials: ApiCredentials
     telegram: TelegramConfig = field(default_factory=TelegramConfig)
     dashboard: DashboardConfig = field(default_factory=DashboardConfig)
+    trading: TradingConfig = field(default_factory=TradingConfig)
     log_level: str = "INFO"
     log_dir: Path = PACKAGE_DIR / "logs"
     state_db_path: Path = PACKAGE_DIR / "state" / "bot_state.db"
@@ -367,6 +436,123 @@ def _parse_dashboard(reader: _Reader) -> DashboardConfig:
     )
 
 
+def _parse_routes(reader: _Reader, accounts: tuple[AccountConfig, ...]) -> tuple[RouteConfig, ...]:
+    known = {a.account_id for a in accounts}
+    routes: dict[str, RouteConfig] = {}
+    for entry in reader.list_("ACCOUNT_ROUTES", ()):
+        account_id, sep, target = entry.partition("=")
+        account_id = account_id.strip()
+        broker_raw, _, arg = target.strip().partition(":")
+        if not sep or account_id not in known:
+            reader.errors.append(f"ACCOUNT_ROUTES entry {entry!r}: unknown account or missing '='")
+            continue
+        try:
+            broker = BrokerKind(broker_raw.strip().lower())
+        except ValueError:
+            reader.errors.append(f"ACCOUNT_ROUTES entry {entry!r}: broker must be paper, tradovate or bybit")
+            continue
+        arg = arg.strip()
+        if broker is BrokerKind.TRADOVATE and not arg:
+            reader.errors.append(f"ACCOUNT_ROUTES entry {entry!r}: tradovate needs the account name, "
+                                 "e.g. apex_1=tradovate:APEX123456")
+            continue
+        if broker is BrokerKind.PAPER and arg.lower() not in ("", "futures", "crypto"):
+            reader.errors.append(f"ACCOUNT_ROUTES entry {entry!r}: paper takes futures or crypto")
+            continue
+        routes[account_id] = RouteConfig(
+            account_id, broker,
+            arg if broker is BrokerKind.TRADOVATE else account_id,
+            arg.lower() if broker is BrokerKind.PAPER else "",
+        )
+    # Accounts without a route trade on the paper broker.
+    for account in accounts:
+        routes.setdefault(account.account_id, RouteConfig(account.account_id, BrokerKind.PAPER,
+                                                          account.account_id))
+    return tuple(routes[a.account_id] for a in accounts)
+
+
+def _parse_trading(reader: _Reader, accounts: tuple[AccountConfig, ...], environment: Environment) -> TradingConfig:
+    minutes = reader.int_("STRATEGY_TIMEFRAME_MINUTES", 5, lo=1)
+    strategy = StrategyConfig(
+        name=reader.raw("STRATEGY", "ema_cross").lower(),
+        symbols=tuple(s.upper() for s in reader.list_("STRATEGY_SYMBOLS", ("NQ", "BTCUSDT"))),
+        timeframe_minutes=minutes,
+        ema_fast=reader.int_("EMA_FAST", 9, lo=1),
+        ema_slow=reader.int_("EMA_SLOW", 21, lo=2),
+        atr_period=reader.int_("ATR_PERIOD", 14, lo=1),
+        atr_stop_mult=reader.float_("ATR_STOP_MULT", 1.5, lo=0, hi=20),
+        reward_risk=reader.float_("REWARD_RISK", 2.0, lo=0, hi=20),
+        allow_short=reader.bool_("ALLOW_SHORT", True),
+    )
+    if strategy.name != "ema_cross":
+        reader.errors.append(f"STRATEGY={strategy.name!r}: only ema_cross is available")
+    if strategy.ema_fast >= strategy.ema_slow:
+        reader.errors.append("EMA_FAST must be smaller than EMA_SLOW")
+    from ..risk_manager.position_sizing import INSTRUMENTS
+
+    for symbol in strategy.symbols:
+        if symbol not in INSTRUMENTS:
+            reader.errors.append(f"STRATEGY_SYMBOLS: no instrument spec for {symbol}")
+
+    contracts: list[tuple[str, str]] = []
+    for entry in reader.list_("TRADOVATE_CONTRACTS", ()):
+        symbol, sep, contract = entry.partition(":")
+        if not sep or not contract.strip():
+            reader.errors.append(f"TRADOVATE_CONTRACTS entry {entry!r} must look like NQ:NQZ6")
+            continue
+        contracts.append((symbol.strip().upper(), contract.strip().upper()))
+    tradovate = TradovateConfig(
+        username=reader.raw("TRADOVATE_USERNAME"),
+        password=Secret(reader.raw("TRADOVATE_PASSWORD")),
+        app_id=reader.raw("TRADOVATE_APP_ID", "trading-bot"),
+        app_version=reader.raw("TRADOVATE_APP_VERSION", "1.0"),
+        cid=reader.raw("TRADOVATE_CID") or reader.raw("FUTURES_API_KEY"),
+        secret=Secret(reader.raw("TRADOVATE_SECRET") or reader.raw("FUTURES_API_SECRET")),
+        contracts=tuple(contracts),
+    )
+    routes = _parse_routes(reader, accounts)
+    bybit_keys: list[tuple[str, Secret, Secret]] = []
+    for route in routes:
+        if route.broker is BrokerKind.TRADOVATE and not tradovate.configured:
+            reader.errors.append(f"{route.account_id} routes to tradovate but TRADOVATE_USERNAME/PASSWORD/"
+                                 "CID/SECRET are not all set")
+        if route.broker is BrokerKind.BYBIT:
+            suffix = re.sub(r"[^A-Za-z0-9]", "_", route.account_id).upper()
+            key = reader.raw(f"BYBIT_API_KEY_{suffix}") or reader.raw("CRYPTO_API_KEY")
+            secret = reader.raw(f"BYBIT_API_SECRET_{suffix}") or reader.raw("CRYPTO_API_SECRET")
+            if not key or not secret:
+                reader.errors.append(f"{route.account_id} routes to bybit but has no API key "
+                                     f"(BYBIT_API_KEY_{suffix} or CRYPTO_API_KEY)")
+            bybit_keys.append((route.account_id, Secret(key), Secret(secret)))
+    if any(r.broker is BrokerKind.TRADOVATE for r in routes):
+        configured = {s for s, _ in contracts}
+        for symbol in strategy.symbols:
+            spec = INSTRUMENTS.get(symbol)
+            if spec is not None and spec.asset_class.value == "futures" and symbol not in configured:
+                reader.errors.append(f"TRADOVATE_CONTRACTS has no contract month for {symbol}")
+
+    source = reader.enum_("MARKET_DATA", MarketDataSource.AUTO, MarketDataSource)
+    replay_raw = reader.raw("MARKET_DATA_REPLAY_FILE")
+    if source is MarketDataSource.REPLAY and not replay_raw:
+        reader.errors.append("MARKET_DATA=replay requires MARKET_DATA_REPLAY_FILE")
+    sim_raw = reader.raw("SIMULATED_BAR_SECONDS")
+    enabled = reader.bool_("TRADING_ENABLED", False)
+    if enabled and environment is Environment.LIVE and source is not MarketDataSource.AUTO:
+        reader.errors.append("ENVIRONMENT=live must use real market data (MARKET_DATA=auto)")
+    return TradingConfig(
+        enabled=enabled,
+        strategy=strategy,
+        routes=routes,
+        market_data=source,
+        replay_file=reader.path("MARKET_DATA_REPLAY_FILE", PACKAGE_DIR) if replay_raw else None,
+        simulated_bar_seconds=reader.float_("SIMULATED_BAR_SECONDS", 1.0, lo=0, hi=86400) if sim_raw else None,
+        account_poll_seconds=reader.float_("ACCOUNT_POLL_SECONDS", 5.0, lo=0, hi=300),
+        flatten_on_news=reader.bool_("FLATTEN_ON_NEWS", True),
+        tradovate=tradovate,
+        bybit_keys=tuple(bybit_keys),
+    )
+
+
 def settings_from_env(env: Mapping[str, str]) -> Settings:
     """Build and validate :class:`Settings` from an environment mapping."""
     r = _Reader(env)
@@ -410,9 +596,11 @@ def settings_from_env(env: Mapping[str, str]) -> Settings:
     if log_level not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
         r.errors.append(f"LOG_LEVEL={log_level!r} is not a logging level")
 
+    environment = r.enum_("ENVIRONMENT", Environment.PAPER, Environment)
+    accounts = _parse_accounts(r)
     settings = Settings(
-        environment=r.enum_("ENVIRONMENT", Environment.PAPER, Environment),
-        accounts=_parse_accounts(r),
+        environment=environment,
+        accounts=accounts,
         risk=risk,
         session=_parse_session(r),
         news=news,
@@ -424,6 +612,7 @@ def settings_from_env(env: Mapping[str, str]) -> Settings:
         ),
         telegram=_parse_telegram(r),
         dashboard=_parse_dashboard(r),
+        trading=_parse_trading(r, accounts, environment),
         log_level=log_level,
         log_dir=r.path("LOG_DIR", PACKAGE_DIR / "logs"),
         state_db_path=r.path("STATE_DB_PATH", PACKAGE_DIR / "state" / "bot_state.db"),

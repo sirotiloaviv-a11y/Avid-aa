@@ -35,6 +35,8 @@ EXIT_STATUS: dict[str, str] = {
     "news_halt": "NEWS",
     "daily_halt": "DAILY HALT",
     "manual": "MANUAL",
+    "signal": "SIGNAL",
+    "risk_halt": "RISK HALT",
     "other": "CLOSED",
 }
 
