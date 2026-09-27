@@ -44,6 +44,36 @@ CREATE TABLE IF NOT EXISTS kv (
     value       TEXT NOT NULL,
     updated_at  TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS trades (
+    account_id   TEXT NOT NULL,
+    trade_id     TEXT NOT NULL,
+    symbol       TEXT NOT NULL,
+    direction    TEXT,
+    entry_price  REAL,
+    stop_price   REAL,
+    take_profit  REAL,
+    quantity     REAL,
+    risk         REAL NOT NULL,
+    opened_at    TEXT NOT NULL,
+    exit_price   REAL,
+    realized_pnl REAL,
+    exit_reason  TEXT,
+    closed_at    TEXT,
+    PRIMARY KEY (account_id, trade_id)
+);
+CREATE INDEX IF NOT EXISTS idx_trades_opened ON trades (opened_at);
+CREATE TABLE IF NOT EXISTS control_requests (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id   TEXT NOT NULL,
+    action       TEXT NOT NULL,
+    argument     TEXT NOT NULL DEFAULT '',
+    operator     TEXT NOT NULL,
+    created_at   TEXT NOT NULL,
+    claimed_at   TEXT,
+    completed_at TEXT,
+    ok           INTEGER,
+    result       TEXT
+);
 """
 
 
@@ -61,6 +91,66 @@ class RiskEventRecord:
     ts: datetime
     kind: str
     message: str
+
+
+@dataclass(frozen=True)
+class TradeRecord:
+    account_id: str
+    trade_id: str
+    symbol: str
+    direction: str | None
+    entry_price: float | None
+    stop_price: float | None
+    take_profit: float | None
+    quantity: float | None
+    risk: float
+    opened_at: datetime
+    exit_price: float | None = None
+    realized_pnl: float | None = None
+    exit_reason: str | None = None
+    closed_at: datetime | None = None
+
+    @property
+    def is_open(self) -> bool:
+        return self.closed_at is None
+
+
+@dataclass(frozen=True)
+class ControlRequest:
+    id: int
+    account_id: str
+    action: str
+    argument: str
+    operator: str
+    created_at: datetime
+    completed_at: datetime | None = None
+    ok: bool | None = None
+    result: str | None = None
+
+
+_TRADE_COLUMNS = (
+    "account_id, trade_id, symbol, direction, entry_price, stop_price, take_profit, "
+    "quantity, risk, opened_at, exit_price, realized_pnl, exit_reason, closed_at"
+)
+_CONTROL_COLUMNS = "id, account_id, action, argument, operator, created_at, completed_at, ok, result"
+
+
+def _ts(value: Any) -> datetime | None:
+    return datetime.fromisoformat(str(value)) if value else None
+
+
+def _trade(row: tuple[Any, ...]) -> TradeRecord:
+    opened = _ts(row[9])
+    assert opened is not None
+    return TradeRecord(row[0], row[1], row[2], row[3], row[4], row[5], row[6], row[7],
+                       float(row[8]), opened, row[10], row[11], row[12], _ts(row[13]))
+
+
+def _control(row: tuple[Any, ...]) -> ControlRequest:
+    created = _ts(row[5])
+    assert created is not None
+    return ControlRequest(int(row[0]), row[1], row[2], row[3], row[4], created, _ts(row[6]),
+                          None if row[7] is None else bool(row[7]), row[8])
 
 
 class StateStore:
@@ -140,6 +230,123 @@ class StateStore:
                 (account_id, limit),
             ).fetchall()
         return [RiskEventRecord(r[0], datetime.fromisoformat(r[1]), r[2], r[3]) for r in rows]
+
+    def recent_events_all(self, limit: int = 50) -> list[RiskEventRecord]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT account_id, ts, kind, message FROM risk_events ORDER BY id DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [RiskEventRecord(r[0], datetime.fromisoformat(r[1]), r[2], r[3]) for r in rows]
+
+    # --------------------------------------------------------------- trades
+    def record_trade_open(self, trade: TradeRecord) -> None:
+        with self._lock:
+            try:
+                self._conn.execute(
+                    f"INSERT OR REPLACE INTO trades ({_TRADE_COLUMNS}) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL)",
+                    (trade.account_id, trade.trade_id, trade.symbol, trade.direction,
+                     trade.entry_price, trade.stop_price, trade.take_profit, trade.quantity,
+                     trade.risk, trade.opened_at.isoformat()),
+                )
+            except sqlite3.Error as exc:
+                raise StateStoreError(f"cannot journal trade {trade.trade_id}: {exc}") from exc
+
+    def record_trade_close(
+        self,
+        account_id: str,
+        trade_id: str,
+        *,
+        symbol: str | None,
+        exit_price: float | None,
+        realized_pnl: float,
+        reason: str,
+        closed_at: datetime,
+    ) -> None:
+        """Close a journaled trade; a trade never journaled as open is inserted."""
+        with self._lock:
+            try:
+                cur = self._conn.execute(
+                    "UPDATE trades SET exit_price = ?, realized_pnl = ?, exit_reason = ?, "
+                    "closed_at = ? WHERE account_id = ? AND trade_id = ?",
+                    (exit_price, realized_pnl, reason, closed_at.isoformat(), account_id, trade_id),
+                )
+                if cur.rowcount == 0:
+                    self._conn.execute(
+                        f"INSERT INTO trades ({_TRADE_COLUMNS}) "
+                        "VALUES (?, ?, ?, NULL, NULL, NULL, NULL, NULL, 0, ?, ?, ?, ?, ?)",
+                        (account_id, trade_id, symbol or "?", closed_at.isoformat(),
+                         exit_price, realized_pnl, reason, closed_at.isoformat()),
+                    )
+            except sqlite3.Error as exc:
+                raise StateStoreError(f"cannot journal close of {trade_id}: {exc}") from exc
+
+    def recent_trades(self, limit: int = 100, account_id: str | None = None) -> list[TradeRecord]:
+        """Newest first, by close time for closed trades and open time otherwise."""
+        sql = f"SELECT {_TRADE_COLUMNS} FROM trades"
+        params: list[Any] = []
+        if account_id is not None:
+            sql += " WHERE account_id = ?"
+            params.append(account_id)
+        sql += " ORDER BY COALESCE(closed_at, opened_at) DESC LIMIT ?"
+        params.append(limit)
+        with self._lock:
+            rows = self._conn.execute(sql, params).fetchall()
+        return [_trade(r) for r in rows]
+
+    # ------------------------------------------------------ control requests
+    def enqueue_control(self, account_id: str, action: str, argument: str, operator: str) -> int:
+        """Queue an operator action for the process that owns the engines."""
+        with self._lock:
+            try:
+                cur = self._conn.execute(
+                    "INSERT INTO control_requests (account_id, action, argument, operator, created_at) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (account_id, action, argument, operator, utc_now().isoformat()),
+                )
+            except sqlite3.Error as exc:
+                raise StateStoreError(f"cannot queue control request: {exc}") from exc
+            return int(cur.lastrowid or 0)
+
+    def claim_controls(self) -> list[ControlRequest]:
+        """Atomically take every unclaimed request; each is returned exactly once."""
+        now = utc_now().isoformat()
+        with self._lock:
+            try:
+                self._conn.execute("BEGIN IMMEDIATE")
+                try:
+                    rows = self._conn.execute(
+                        f"SELECT {_CONTROL_COLUMNS} FROM control_requests "
+                        "WHERE claimed_at IS NULL ORDER BY id"
+                    ).fetchall()
+                    self._conn.execute(
+                        "UPDATE control_requests SET claimed_at = ? WHERE claimed_at IS NULL", (now,)
+                    )
+                    self._conn.execute("COMMIT")
+                except BaseException:
+                    self._conn.execute("ROLLBACK")
+                    raise
+            except sqlite3.Error as exc:
+                raise StateStoreError(f"cannot claim control requests: {exc}") from exc
+        return [_control(r) for r in rows]
+
+    def complete_control(self, request_id: int, ok: bool, result: str) -> None:
+        with self._lock:
+            try:
+                self._conn.execute(
+                    "UPDATE control_requests SET completed_at = ?, ok = ?, result = ? WHERE id = ?",
+                    (utc_now().isoformat(), int(ok), result, request_id),
+                )
+            except sqlite3.Error as exc:
+                raise StateStoreError(f"cannot complete control request: {exc}") from exc
+
+    def get_control(self, request_id: int) -> ControlRequest | None:
+        with self._lock:
+            row = self._conn.execute(
+                f"SELECT {_CONTROL_COLUMNS} FROM control_requests WHERE id = ?", (request_id,)
+            ).fetchone()
+        return None if row is None else _control(row)
 
     # ------------------------------------------------------------ key/value
     def get_value(self, key: str) -> str | None:

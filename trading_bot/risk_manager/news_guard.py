@@ -257,10 +257,12 @@ class NewsGuard:
             self._loaded_at = now
             log.info("Loaded %d high-impact events (of %d)", len(self._events), len(events))
 
-    def check(self, now: datetime | None = None) -> NewsCheck:
+    def check(self, now: datetime | None = None, *, refresh: bool = True) -> NewsCheck:
+        """``refresh=False`` for display paths that must never block on the network."""
         if self.provider is None:
             return NewsCheck(True)
-        self.refresh()
+        if refresh:
+            self.refresh()
         now = ensure_utc(now) if now is not None else self._clock()
         with self._lock:
             loaded_at, events = self._loaded_at, self._events

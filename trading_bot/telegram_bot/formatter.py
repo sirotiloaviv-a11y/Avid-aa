@@ -166,7 +166,10 @@ def format_halt(event: HaltEvent, halted_until: datetime | None = None) -> str:
 
 # ---------------------------------------------------------------- replies
 def _status_block(status: RiskStatus) -> list[str]:
-    state = "🛑 HALTED" if status.halted else "🟢 OK"
+    if status.halted and all(r.startswith("paused") for r in status.halt_reasons):
+        state = "⏸ PAUSED"
+    else:
+        state = "🛑 HALTED" if status.halted else "🟢 OK"
     lines = [
         f"<b>{esc(status.account_id)}</b> · {state}",
         f"Balance {fmt_money(status.balance)} · Equity {fmt_money(status.equity)}",

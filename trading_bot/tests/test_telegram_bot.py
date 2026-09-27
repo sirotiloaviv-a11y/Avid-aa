@@ -16,6 +16,7 @@ from trading_bot.risk_manager import (
     HaltEvent,
     Impact,
     NewsGuard,
+    OperatorControls,
     RiskEngine,
     RiskEvent,
     RiskManager,
@@ -243,7 +244,7 @@ class CommandProcessorTests(Fixture):
                 return [cpi]
 
         guard = NewsGuard(Provider(), NewsConfig(), clock=self.clock)
-        self.processor = CommandProcessor(self.manager, guard, self.kill, clock=self.clock)
+        self.processor = CommandProcessor(OperatorControls(self.manager, self.kill), guard, clock=self.clock)
         for engine in self.manager:
             engine.update_account(100_000, 100_000)
 
@@ -264,7 +265,7 @@ class CommandProcessorTests(Fixture):
         reply = self.run_cmd("/halt fat finger")
         self.assertIn("EMERGENCY HALT", reply)
         self.assertTrue(self.kill.exists())
-        self.assertIn("tester: fat finger", self.kill.read_text())
+        self.assertIn("telegram:tester: fat finger", self.kill.read_text())
         for engine in self.manager:
             self.assertFalse(engine.check_new_trade().allowed)
         reply = self.run_cmd("/resume")
@@ -288,7 +289,7 @@ class CommandProcessorTests(Fixture):
 class ResponderTests(Fixture):
     def setUp(self) -> None:
         super().setUp()
-        processor = CommandProcessor(self.manager, None, self.kill, clock=self.clock)
+        processor = CommandProcessor(OperatorControls(self.manager, self.kill), None, clock=self.clock)
         self.responder = CommandResponder(self.client, processor, self.notifier, ["111"],
                                           self.store, clock=self.clock)
 

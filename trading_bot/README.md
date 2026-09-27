@@ -2,7 +2,8 @@
 
 Built to run unattended 24/7 on a VPS. **Module 1** is the core
 infrastructure and the fail-safe risk manager; **Module 2** is Telegram alerts
-and operator commands. It does not place orders yet. The execution and
+and operator commands; **Module 3** is the web dashboard. It does not place
+orders yet. The execution and
 strategy modules will call into the risk engine before every entry.
 
 ```
@@ -11,7 +12,15 @@ trading_bot/
 ├── risk_manager/
 │   ├── risk_engine.py          RiskEngine (one per account) + RiskManager
 │   ├── position_sizing.py      contracts / lots from stop distance
-│   └── news_guard.py           economic-calendar blackout
+│   ├── news_guard.py           economic-calendar blackout
+│   ├── controls.py             kill / resume / pause, shared by UI, Telegram, CLI
+│   └── events.py               risk events published to subscribers
+├── dashboard/
+│   ├── state.py                statuses / journal → dashboard JSON (badges, totals)
+│   ├── app.py                  routes, Basic auth, lockout, CSRF checks
+│   ├── server.py               threaded HTTP server + live event stream (SSE)
+│   └── static/                 index.html, app.css, app.js (no CDN, strict CSP)
+├── runtime.py                  BotRuntime: the one process that owns the state
 ├── telegram_bot/
 │   ├── api.py                  Bot API client (urllib)
 │   ├── formatter.py            events / statuses → Telegram HTML
@@ -64,18 +73,16 @@ for crypto firms that reset at midnight UTC.
 
 ```python
 from trading_bot.config import load_settings
-from trading_bot.risk_manager import RiskManager, build_news_guard, get_instrument
-from trading_bot.utils import StateStore, setup_logging
+from trading_bot.risk_manager import get_instrument
+from trading_bot.runtime import BotRuntime
+from trading_bot.utils import setup_logging
 
 settings = load_settings()
 setup_logging(settings.log_dir, settings.log_level)
-store = StateStore(settings.state_db_path)
-risk = RiskManager.from_settings(
-    settings, store,
-    news_guard=build_news_guard(settings.news),
-    kill_switch_path=settings.state_db_path.parent / "KILL",
-)
-risk.on_halt(lambda event: broker.flatten_all(event.account_id))   # module 2
+runtime = BotRuntime(settings)        # takes state/bot.lock; builds engines,
+runtime.start()                       # dashboard, Telegram and the control poller
+risk = runtime.manager
+risk.on_halt(lambda event: broker.flatten_all(event.account_id))   # execution layer
 
 engine = risk["apex_nq_1"]
 engine.update_account(balance=50_000, equity=49_870)                # on every broker update
@@ -134,14 +141,67 @@ Commands older than 2 minutes are not executed, and on first start any queued
 backlog is skipped, so a `/resume` sent while the bot was down never runs late.
 
 Alerts go through a background queue with retries, so Telegram being slow or
-down never blocks the risk engine. Run the Telegram service in the same
-process as the risk engines (`TelegramService(...).start()`); `run` does that
-for now, until the trading loop exists.
+down never blocks the risk engine. `BotRuntime` starts the Telegram service in
+the same process as the risk engines.
+
+## Web dashboard (Module 3)
+
+Set `DASHBOARD_PASSWORD` (12+ characters) and run `python -m trading_bot run`.
+The dashboard is served on `DASHBOARD_HOST:DASHBOARD_PORT` (default
+`127.0.0.1:8080`) from the same process as the risk engines.
+
+- **Header:** overall status (ACTIVE / PARTIAL / HALTED), total equity, today's
+  P&L in $ and %, and a countdown to the next high-impact news release.
+- **Account cards:** balance, equity, today's P&L, daily-drawdown and
+  max-drawdown bars, and a badge. Badges are ACTIVE, HIGH_RISK (≥ 80% of either
+  limit), HALTED, PAUSED, or OFFLINE (no fresh account snapshot).
+- **Trade history:** filter by account, status or symbol; click a column to
+  sort. Below it is the activity log (halts, warnings, pauses, resets).
+- **Controls:**
+  - KILL SWITCH (with a confirmation dialog) halts and flattens every account.
+  - RESUME clears the kill switch and manual halts.
+  - The per-account switch *pauses* an account: no new entries, open positions
+    are kept.
+  - Daily-loss and max-drawdown halts can't be cleared from the UI.
+
+Updates stream live over Server-Sent Events, and the page falls back to
+polling if the stream drops.
+
+**Security.**
+- Basic auth on every page except `/healthz`. After 10 failed logins, that IP
+  address is locked out for 5 minutes.
+- Control requests must carry a custom header and a JSON body, so another
+  website can't trigger them through your browser.
+- A strict Content-Security-Policy; the page loads nothing from outside.
+
+Basic auth sends the password with every request, so don't expose plain HTTP.
+Keep `DASHBOARD_HOST=127.0.0.1` and use one of:
+
+```bash
+# HTTPS with automatic certificates (Caddy):
+caddy reverse-proxy --from dashboard.example.com --to 127.0.0.1:8080
+# or an SSH tunnel from your laptop, then open http://localhost:8080
+ssh -L 8080:127.0.0.1:8080 you@your-vps
+```
+
+## One process owns the state
+
+`python -m trading_bot run` (and, later, the trading loop) holds
+`state/bot.lock` for as long as it runs. While it is held, CLI control
+commands such as `halt`, `pause` and `kill` don't write account state
+themselves; otherwise the running bot would overwrite them from memory. They
+queue a request in SQLite, the bot applies it within about a second, and the
+CLI prints the result. With no bot running, the CLI applies the change
+directly. Requests older than 2 minutes are expired, not applied.
 
 ## Operator commands
 
 ```bash
-python -m trading_bot run                    # Telegram alerts + commands (blocks)
+python -m trading_bot run                    # dashboard + Telegram + controls (blocks)
+python -m trading_bot kill "reason"          # emergency halt, all accounts
+python -m trading_bot resume-all             # clear kill switch + manual halts
+python -m trading_bot pause apex_nq_1        # block new entries, keep positions
+python -m trading_bot unpause apex_nq_1
 python -m trading_bot telegram-test          # send a test message
 python -m trading_bot status                 # every account: P&L, floors, room, halts
 python -m trading_bot news                   # blackout state + this week's events

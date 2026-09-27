@@ -13,7 +13,6 @@ from trading_bot.risk_manager import (
     Impact,
     NewsCheck,
     OpenTrade,
-    RiskStatus,
     TradeClosedEvent,
     TradeOpenedEvent,
 )
@@ -34,21 +33,11 @@ from trading_bot.telegram_bot.formatter import (
 )
 from trading_bot.telegram_bot.notifier import html_to_plain
 
-AT = datetime(2026, 3, 10, 14, 30, tzinfo=timezone.utc)
+from .helpers import AT, make_status
 
 
-def status(account_id: str = "apex_nq_1", **overrides: object) -> RiskStatus:
-    values: dict[str, object] = dict(
-        account_id=account_id, trading_day=date(2026, 3, 10), balance=50_000.0,
-        equity=49_700.0, last_update=AT, day_start_reference=50_000.0, daily_pnl=-300.0,
-        daily_loss_floor=49_250.0, daily_room=450.0, drawdown_floor=47_500.0,
-        drawdown_room=2_200.0, high_water_mark=50_000.0, open_risk=0.0, trades_today=2,
-        realized_pnl_today=-300.0, wins_today=1, losses_today=1, closed_today=2,
-        daily_loss_used_pct=40.0, open_trades=(), halted=False, halt_reasons=(),
-        should_flatten=False, halted_until=None,
-    )
-    values.update(overrides)
-    return RiskStatus(**values)  # type: ignore[arg-type]
+
+status = make_status
 
 
 class ValueFormattingTests(unittest.TestCase):

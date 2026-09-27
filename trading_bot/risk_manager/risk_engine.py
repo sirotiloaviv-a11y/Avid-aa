@@ -42,7 +42,7 @@ from ..config import (
     Settings,
 )
 from ..utils.logger import get_logger
-from ..utils.state_store import StateStore, StateStoreError
+from ..utils.state_store import StateStore, StateStoreError, TradeRecord
 from ..utils.time_utils import ensure_utc, next_reset, trading_day, utc_now
 from .events import (
     Direction,
@@ -108,6 +108,9 @@ class AccountState:
     max_dd_reason: str | None = None
     manual_halt: bool = False
     manual_halt_reason: str | None = None
+    # Pause blocks new entries but, unlike a halt, does not flatten positions.
+    paused: bool = False
+    pause_reason: str | None = None
     open_trades: dict[str, OpenTrade] = field(default_factory=lambda: dict[str, OpenTrade]())
 
     def to_dict(self) -> dict[str, Any]:
@@ -125,6 +128,7 @@ class AccountState:
 @dataclass(frozen=True)
 class RiskStatus:
     account_id: str
+    initial_balance: float
     trading_day: date | None
     balance: float | None
     equity: float | None
@@ -135,6 +139,10 @@ class RiskStatus:
     daily_room: float | None
     drawdown_floor: float
     drawdown_room: float | None
+    # Distance to the drawdown floor used, 0-100: (allowance - room) / allowance.
+    drawdown_used_pct: float | None
+    daily_loss_limit: float | None
+    drawdown_allowance: float
     high_water_mark: float
     open_risk: float
     trades_today: int
@@ -149,6 +157,8 @@ class RiskStatus:
     halt_reasons: tuple[str, ...]
     should_flatten: bool
     halted_until: datetime | None
+    paused: bool = False
+    manual_halt: bool = False
 
 
 @dataclass(frozen=True)
@@ -370,6 +380,8 @@ class RiskEngine:
                 level = max(new_levels)
                 log.warning("[%s] Daily loss at %.0f%% of allowance (warning level %d%%)",
                             s.account_id, used, level)
+                self.store.append_event(s.account_id, "warning",
+                                        f"daily loss at {used:.0f}% of the limit", now)
                 self._publish(DrawdownWarningEvent(
                     account_id=s.account_id, level_pct=level, used_pct=used,
                     daily_pnl=s.equity - reference, daily_limit=reference - daily_floor,
@@ -431,6 +443,11 @@ class RiskEngine:
             )
             s.trades_today += 1
             self._persist()
+            self._journal(lambda: self.store.record_trade_open(TradeRecord(
+                s.account_id, trade_id, symbol, direction.value if direction else None,
+                entry_price, stop_price, take_profit,
+                float(quantity) if quantity is not None else None, risk, now,
+            )))
             log.info("[%s] Opened %s %s risk=%.2f (trade %d/%d today)",
                      s.account_id, trade_id, symbol, risk,
                      s.trades_today, self.limits.max_trades_per_day)
@@ -470,6 +487,10 @@ class RiskEngine:
             elif pnl < 0:
                 s.losses_today += 1
             self._persist()
+            self._journal(lambda: self.store.record_trade_close(
+                s.account_id, trade_id, symbol=trade.symbol if trade else None,
+                exit_price=exit_price, realized_pnl=pnl, reason=reason.value, closed_at=now,
+            ))
             log.info("[%s] Closed %s pnl=%.2f reason=%s realized_today=%.2f",
                      s.account_id, trade_id, pnl, reason.value, s.realized_pnl_today)
             new_balance = balance if balance is not None else s.balance
@@ -484,6 +505,13 @@ class RiskEngine:
             reason=reason, balance=new_balance, at=now,
         ))
 
+    def _journal(self, write: Callable[[], None]) -> None:
+        # The journal feeds the dashboard; the risk state is already saved.
+        try:
+            write()
+        except StateStoreError as exc:
+            log.error("[%s] Trade journal write failed: %s", self.account.account_id, exc)
+
     # -------------------------------------------------------- manual halts
     def halt(self, reason: str, *, now: datetime | None = None) -> None:
         """Operator kill switch for this account; persists until resumed."""
@@ -496,11 +524,32 @@ class RiskEngine:
 
     def resume_manual_halt(self) -> None:
         with self._lock:
+            if not self.state.manual_halt:
+                return
             self.state.manual_halt = False
             self.state.manual_halt_reason = None
             self._persist()
             self.store.append_event(self.state.account_id, "resume", "manual halt cleared")
             log.warning("[%s] Manual halt cleared by operator", self.state.account_id)
+
+    def pause(self, reason: str) -> None:
+        """Stop new entries on this account; open positions are left alone."""
+        with self._lock:
+            self.state.paused = True
+            self.state.pause_reason = reason
+            self._persist()
+            self.store.append_event(self.state.account_id, "pause", reason)
+            log.warning("[%s] Paused: %s", self.state.account_id, reason)
+
+    def unpause(self) -> None:
+        with self._lock:
+            if not self.state.paused:
+                return
+            self.state.paused = False
+            self.state.pause_reason = None
+            self._persist()
+            self.store.append_event(self.state.account_id, "unpause", "pause cleared")
+            log.warning("[%s] Pause cleared by operator", self.state.account_id)
 
     def clear_max_drawdown_breach(self, confirm_account_id: str) -> None:
         """Only after the prop firm has reset or replaced the account."""
@@ -523,6 +572,8 @@ class RiskEngine:
             reasons.append(state.daily_halt_reason or "daily loss limit hit")
         if state.manual_halt:
             reasons.append(f"manual halt: {state.manual_halt_reason or 'no reason given'}")
+        if state.paused:
+            reasons.append(f"paused: {state.pause_reason or 'by operator'}")
         return reasons
 
     def check_new_trade(self, *, now: datetime | None = None) -> TradeDecision:
@@ -620,8 +671,13 @@ class RiskEngine:
         halted_until: datetime | None = None
         if s.daily_halted and not (s.max_dd_breached or s.manual_halt):
             halted_until = next_reset(now, self.session.reset_tz, self.session.reset_time)
+        allowance = s.initial_balance * self.limits.max_drawdown_pct / 100
+        dd_used = None
+        if s.equity is not None and allowance > 0:
+            dd_used = min(100.0, max(0.0, (allowance - (s.equity - dd_floor)) / allowance * 100))
         return RiskStatus(
             account_id=s.account_id,
+            initial_balance=s.initial_balance,
             trading_day=date.fromisoformat(s.trading_day) if s.trading_day else None,
             balance=s.balance,
             equity=s.equity,
@@ -632,6 +688,9 @@ class RiskEngine:
             daily_room=None if daily_floor is None or s.equity is None else s.equity - daily_floor,
             drawdown_floor=dd_floor,
             drawdown_room=None if s.equity is None else s.equity - dd_floor,
+            drawdown_used_pct=dd_used,
+            daily_loss_limit=None if reference is None or daily_floor is None else reference - daily_floor,
+            drawdown_allowance=allowance,
             high_water_mark=s.high_water_mark,
             open_risk=sum(t.risk for t in s.open_trades.values()),
             trades_today=s.trades_today,
@@ -643,8 +702,10 @@ class RiskEngine:
             open_trades=tuple(s.open_trades.values()),
             halted=bool(reasons),
             halt_reasons=tuple(reasons),
-            should_flatten=bool(reasons),
+            should_flatten=s.daily_halted or s.max_dd_breached or s.manual_halt,
             halted_until=halted_until,
+            paused=s.paused,
+            manual_halt=s.manual_halt,
         )
 
 

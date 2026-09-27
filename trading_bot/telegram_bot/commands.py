@@ -14,11 +14,10 @@ import re
 import threading
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import Any, Callable, Sequence, cast
 
+from ..risk_manager.controls import ALL_ACCOUNTS, ControlAction, OperatorControls
 from ..risk_manager.news_guard import NewsCheck, NewsGuard
-from ..risk_manager.risk_engine import RiskManager
 from ..utils.logger import get_logger
 from ..utils.state_store import StateStore, StateStoreError
 from ..utils.time_utils import utc_now
@@ -61,15 +60,14 @@ class CommandProcessor:
 
     def __init__(
         self,
-        manager: RiskManager,
+        controls: OperatorControls,
         news_guard: NewsGuard | None,
-        kill_switch_path: Path,
         *,
         clock: Callable[[], datetime] = utc_now,
     ) -> None:
-        self.manager = manager
+        self.controls = controls
+        self.manager = controls.manager
         self.news_guard = news_guard
-        self.kill_switch_path = kill_switch_path
         self._clock = clock
 
     def handle(self, command: ParsedCommand, *, operator: str) -> str:
@@ -93,7 +91,7 @@ class CommandProcessor:
     def status(self) -> str:
         return format_status(
             self.manager.statuses(),
-            kill_switch_active=self.kill_switch_path.exists(),
+            kill_switch_active=self.controls.kill_switch_active,
             now=self._clock(),
         )
 
@@ -107,38 +105,27 @@ class CommandProcessor:
 
     def halt(self, args: str, operator: str) -> str:
         reason = args or "emergency halt from Telegram"
-        stamp = self._clock().isoformat()
-        # The KILL file comes first: it blocks entries in every process that
-        # shares this state directory, even if an engine call below fails.
-        self.kill_switch_path.parent.mkdir(parents=True, exist_ok=True)
-        self.kill_switch_path.write_text(f"{stamp} {operator}: {reason}\n", encoding="utf-8")
-        log.critical("EMERGENCY HALT via Telegram by %s: %s", operator, reason)
-        failed: list[str] = []
-        for engine in self.manager:
-            try:
-                engine.halt(f"{reason} (Telegram, {operator})")
-            except Exception:
-                log.exception("[%s] Manual halt failed", engine.account.account_id)
-                failed.append(engine.account.account_id)
+        result = self.controls.apply(
+            ControlAction.EMERGENCY_HALT, ALL_ACCOUNTS, reason, f"telegram:{operator}"
+        )
         lines = [
             "🛑 <b>EMERGENCY HALT</b> on all accounts",
-            f"Kill switch: <code>{esc(self.kill_switch_path)}</code>",
+            f"Kill switch: <code>{esc(self.controls.kill_switch_path)}</code>",
             f"Reason: {esc(reason)}",
             "Positions are being flattened. Send /resume to clear.",
         ]
-        if failed:
-            lines.append(f"⚠️ Engine halt failed for: {esc(', '.join(failed))} (KILL file still blocks)")
+        if not result.ok:
+            lines.append(f"⚠️ {esc(result.message)}")
         return "\n".join(lines)
 
     def resume(self, operator: str) -> str:
-        self.kill_switch_path.unlink(missing_ok=True)
-        for engine in self.manager:
-            engine.resume_manual_halt()
-        log.warning("Manual halt cleared via Telegram by %s", operator)
+        result = self.controls.apply(ControlAction.RESUME_ALL, ALL_ACCOUNTS, "", f"telegram:{operator}")
+        if not result.ok:
+            return f"⚠️ {esc(result.message)}"
         still = [s for s in self.manager.statuses() if s.halted]
         lines = ["🟢 <b>Manual halt cleared</b>, kill switch removed."]
         if still:
-            lines.append("Still halted by risk limits:")
+            lines.append("Still halted by risk limits or pause:")
             for status in still:
                 lines.append(f"• <code>{esc(status.account_id)}</code>: {esc('; '.join(status.halt_reasons))}")
         else:

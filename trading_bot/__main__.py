@@ -1,20 +1,27 @@
 """Operator CLI: ``python -m trading_bot <command>``.
 
+    run                         run the bot services (dashboard, Telegram, controls)
     status                      risk state of every account
     news                        upcoming high-impact events and blackout state
-    halt ACCOUNT REASON         kill switch for one account (persists)
-    resume ACCOUNT              clear a manual halt
+    kill [REASON]               emergency halt on ALL accounts (sets state/KILL)
+    resume-all                  clear the kill switch and every manual halt
+    halt ACCOUNT REASON         manual halt (flatten) on one account
+    resume ACCOUNT              clear one account's manual halt
+    pause ACCOUNT [REASON]      block new entries on one account, keep positions
+    unpause ACCOUNT             clear a pause
     clear-drawdown ACCOUNT      clear a max-drawdown breach (after a firm reset)
     check-config                validate .env and exit
     telegram-test               send a test message to TELEGRAM_CHAT_IDS
-    run                         run the Telegram alerts/commands service until stopped
 
-Touching ``state/KILL`` blocks new entries on every account without a restart.
+Control commands are safe while the bot runs: they are queued and applied by
+the running bot, which owns the account state (see risk_manager/controls.py).
+Touching ``state/KILL`` also blocks new entries on every account at once.
 """
 
 from __future__ import annotations
 
 import argparse
+import getpass
 import signal
 import sys
 import threading
@@ -23,13 +30,18 @@ from pathlib import Path
 from typing import Sequence
 
 from .config import ConfigError, Settings, load_settings
-from .risk_manager import NewsGuard, RiskManager, RiskStatus, build_news_guard
-from .telegram_bot import TelegramApiError, TelegramClient, TelegramService
-from .utils import StateStore, StateStoreError, setup_logging
-
-
-def _kill_switch(settings: Settings) -> Path:
-    return settings.state_db_path.parent / "KILL"
+from .risk_manager import (
+    ALL_ACCOUNTS,
+    ControlAction,
+    OperatorControls,
+    RiskManager,
+    RiskStatus,
+    build_news_guard,
+    submit_control,
+)
+from .runtime import AlreadyRunning, BotRuntime, kill_switch_path, lock_path
+from .telegram_bot import TelegramApiError, TelegramClient
+from .utils import ProcessLock, StateStore, StateStoreError, setup_logging
 
 
 def _fmt(value: float | None) -> str:
@@ -63,95 +75,117 @@ def _telegram_test(settings: Settings) -> int:
     return 0 if ok else 1
 
 
-def _run_service(settings: Settings, manager: RiskManager, store: StateStore, news_guard: NewsGuard) -> int:
-    service = TelegramService(
-        settings, manager, store, news_guard=news_guard, kill_switch_path=_kill_switch(settings)
-    )
+def _run(settings: Settings) -> int:
+    try:
+        runtime = BotRuntime(settings)
+    except AlreadyRunning as exc:
+        print(f"Bot already running: {exc}", file=sys.stderr)
+        return 1
     stop = threading.Event()
+
     def _on_signal(_signum: int, _frame: object) -> None:
         stop.set()
 
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, _on_signal)
-    service.start()
+    runtime.start()
+    if runtime.dashboard is not None:
+        print(f"Dashboard: http://{settings.dashboard.host}:{runtime.dashboard.port}")
     try:
-        while not stop.wait(60):
-            news_guard.refresh()
+        runtime.run_until(stop)
     finally:
-        service.stop()
+        runtime.stop()
     return 0
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def _control(settings: Settings, store: StateStore, action: ControlAction, account: str, argument: str) -> int:
+    def build() -> OperatorControls:
+        manager = RiskManager.from_settings(settings, store, kill_switch_path=kill_switch_path(settings))
+        return OperatorControls(manager, kill_switch_path(settings))
+
+    operator = f"cli:{getpass.getuser()}"
+    result = submit_control(store, ProcessLock(lock_path(settings)), build, action, account, argument, operator)
+    if result.ok:
+        print(f"OK: {result.message}")
+        return 0
+    print(f"FAILED: {result.message}", file=sys.stderr)
+    return 1
+
+
+def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python -m trading_bot")
-    parser.add_argument("--env-file", type=Path, default=None, help="path to .env")
+    parser.add_argument("--env-file", default=None, help="path to .env")
     sub = parser.add_subparsers(dest="command", required=True)
-    sub.add_parser("status")
-    sub.add_parser("news")
-    sub.add_parser("check-config")
-    sub.add_parser("telegram-test")
-    sub.add_parser("run")
+    for name in ("run", "status", "news", "check-config", "telegram-test", "resume-all"):
+        sub.add_parser(name)
+    sub.add_parser("kill").add_argument("reason", nargs="?", default="kill switch from CLI")
     halt = sub.add_parser("halt")
     halt.add_argument("account")
     halt.add_argument("reason")
-    sub.add_parser("resume").add_argument("account")
-    sub.add_parser("clear-drawdown").add_argument("account")
-    args = parser.parse_args(argv)
+    pause = sub.add_parser("pause")
+    pause.add_argument("account")
+    pause.add_argument("reason", nargs="?", default="paused from CLI")
+    for name in ("resume", "unpause", "clear-drawdown"):
+        sub.add_parser(name).add_argument("account")
+    return parser
 
+
+def main(argv: Sequence[str] | None = None) -> int:
+    args = _build_parser().parse_args(argv)
     try:
-        settings = load_settings(args.env_file) if args.env_file else load_settings()
+        settings = load_settings(Path(args.env_file)) if args.env_file else load_settings()
     except ConfigError as exc:
         print(exc, file=sys.stderr)
         return 2
     if args.command == "check-config":
-        print(f"OK: {len(settings.accounts)} account(s), environment={settings.environment.value}")
+        print(f"OK: {len(settings.accounts)} account(s), environment={settings.environment.value}, "
+              f"telegram={'on' if settings.telegram.enabled else 'off'}, "
+              f"dashboard={'on' if settings.dashboard.enabled else 'off'}")
         return 0
 
     setup_logging(settings.log_dir, settings.log_level, console=args.command == "run")
-    if args.command in ("telegram-test", "run") and not settings.telegram.enabled:
-        print("Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_IDS first.", file=sys.stderr)
-        return 2
     if args.command == "telegram-test":
+        if not settings.telegram.enabled:
+            print("Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_IDS first.", file=sys.stderr)
+            return 2
         return _telegram_test(settings)
+    if args.command == "run":
+        return _run(settings)
+
     try:
         store = StateStore(settings.state_db_path)
     except StateStoreError as exc:
         print(exc, file=sys.stderr)
         return 1
-
     with store:
-        news_guard = build_news_guard(settings.news)
-        manager = RiskManager.from_settings(
-            settings, store, news_guard=news_guard, kill_switch_path=_kill_switch(settings)
-        )
-        if args.command == "run":
-            return _run_service(settings, manager, store, news_guard)
         if args.command == "status":
+            manager = RiskManager.from_settings(settings, store, kill_switch_path=kill_switch_path(settings))
             for status in manager.statuses():
                 _print_status(status)
-            if _kill_switch(settings).exists():
-                print(f"KILL SWITCH ACTIVE: {_kill_switch(settings)}")
-        elif args.command == "news":
+            if kill_switch_path(settings).exists():
+                print(f"KILL SWITCH ACTIVE: {kill_switch_path(settings)}")
+            return 0
+        if args.command == "news":
+            news_guard = build_news_guard(settings.news)
             news_guard.refresh(force=True)
             check = news_guard.check()
             print("Entries allowed" if check.allowed else f"BLOCKED: {check.reason}")
             for event in news_guard.upcoming(within=timedelta(days=7)):
                 print(f"  {event.time:%a %Y-%m-%d %H:%M} UTC  {event.currency}  {event.title}")
-        else:
-            try:
-                engine = manager[args.account]
-            except KeyError:
-                print(f"unknown account {args.account!r}", file=sys.stderr)
-                return 2
-            if args.command == "halt":
-                engine.halt(args.reason)
-            elif args.command == "resume":
-                engine.resume_manual_halt()
-            elif args.command == "clear-drawdown":
-                answer = input(f"Type {args.account} to confirm the firm has reset this account: ")
-                engine.clear_max_drawdown_breach(answer.strip())
-            _print_status(engine.status())
-    return 0
+            return 0
+        controls: dict[str, tuple[ControlAction, str, str]] = {
+            "kill": (ControlAction.EMERGENCY_HALT, ALL_ACCOUNTS, getattr(args, "reason", "")),
+            "resume-all": (ControlAction.RESUME_ALL, ALL_ACCOUNTS, ""),
+            "halt": (ControlAction.HALT, getattr(args, "account", ""), getattr(args, "reason", "")),
+            "resume": (ControlAction.RESUME, getattr(args, "account", ""), ""),
+            "pause": (ControlAction.PAUSE, getattr(args, "account", ""), getattr(args, "reason", "")),
+            "unpause": (ControlAction.UNPAUSE, getattr(args, "account", ""), ""),
+        }
+        if args.command == "clear-drawdown":
+            answer = input(f"Type {args.account} to confirm the firm has reset this account: ")
+            return _control(settings, store, ControlAction.CLEAR_DRAWDOWN, args.account, answer.strip())
+        action, account, argument = controls[args.command]
+        return _control(settings, store, action, account, argument)
 
 
 if __name__ == "__main__":

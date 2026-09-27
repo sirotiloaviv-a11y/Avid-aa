@@ -8,10 +8,10 @@ in any other process sharing the state directory.)
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any, cast
 
 from ..config import Settings
+from ..risk_manager.controls import OperatorControls
 from ..risk_manager.news_guard import NewsGuard
 from ..risk_manager.risk_engine import RiskManager
 from ..utils.logger import get_logger
@@ -33,7 +33,7 @@ class TelegramService:
         store: StateStore,
         *,
         news_guard: NewsGuard | None,
-        kill_switch_path: Path,
+        controls: OperatorControls,
         client: TelegramClient | None = None,
     ) -> None:
         config = settings.telegram
@@ -46,7 +46,7 @@ class TelegramService:
         self.manager = manager
         self.responder: CommandResponder | None = None
         if config.commands_enabled:
-            processor = CommandProcessor(manager, news_guard, kill_switch_path)
+            processor = CommandProcessor(controls, news_guard)
             self.responder = CommandResponder(
                 self.client, processor, self.notifier, config.chat_ids, store,
                 bot_username=self._bot_username(),

@@ -155,6 +155,23 @@ class TelegramConfig:
 
 
 @dataclass(frozen=True)
+class DashboardConfig:
+    # Basic-auth credentials. The dashboard stays off until a password is set.
+    username: str = "admin"
+    password: Secret = field(default_factory=lambda: Secret(""))
+    # 127.0.0.1 by default: put HTTPS in front (Caddy / nginx) or use an SSH
+    # tunnel. Basic auth over plain HTTP on 0.0.0.0 sends the password in clear.
+    host: str = "127.0.0.1"
+    port: int = 8080
+    # Account badge turns HIGH_RISK at this share of the daily or max-DD limit.
+    high_risk_pct: float = 80.0
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.password)
+
+
+@dataclass(frozen=True)
 class Settings:
     environment: Environment
     accounts: tuple[AccountConfig, ...]
@@ -163,6 +180,7 @@ class Settings:
     news: NewsConfig
     credentials: ApiCredentials
     telegram: TelegramConfig = field(default_factory=TelegramConfig)
+    dashboard: DashboardConfig = field(default_factory=DashboardConfig)
     log_level: str = "INFO"
     log_dir: Path = PACKAGE_DIR / "logs"
     state_db_path: Path = PACKAGE_DIR / "state" / "bot_state.db"
@@ -330,6 +348,25 @@ def _parse_telegram(reader: _Reader) -> TelegramConfig:
     )
 
 
+def _parse_dashboard(reader: _Reader) -> DashboardConfig:
+    password = reader.raw("DASHBOARD_PASSWORD")
+    if password and len(password) < 12:
+        reader.errors.append("DASHBOARD_PASSWORD must be at least 12 characters")
+    username = reader.raw("DASHBOARD_USERNAME", "admin")
+    if ":" in username:
+        reader.errors.append("DASHBOARD_USERNAME must not contain ':'")
+    port = reader.int_("DASHBOARD_PORT", 8080, lo=1)
+    if port > 65535:
+        reader.errors.append(f"DASHBOARD_PORT={port} is not a valid port")
+    return DashboardConfig(
+        username=username,
+        password=Secret(password),
+        host=reader.raw("DASHBOARD_HOST", "127.0.0.1"),
+        port=port,
+        high_risk_pct=reader.float_("DASHBOARD_HIGH_RISK_PCT", 80.0, lo=0, hi=100),
+    )
+
+
 def settings_from_env(env: Mapping[str, str]) -> Settings:
     """Build and validate :class:`Settings` from an environment mapping."""
     r = _Reader(env)
@@ -386,6 +423,7 @@ def settings_from_env(env: Mapping[str, str]) -> Settings:
             futures_api_secret=Secret(r.raw("FUTURES_API_SECRET")),
         ),
         telegram=_parse_telegram(r),
+        dashboard=_parse_dashboard(r),
         log_level=log_level,
         log_dir=r.path("LOG_DIR", PACKAGE_DIR / "logs"),
         state_db_path=r.path("STATE_DB_PATH", PACKAGE_DIR / "state" / "bot_state.db"),

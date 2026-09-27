@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Trading Bot Control</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true">◆</span>
+      <span>Prop Desk</span>
+      <span id="env" class="tag">—</span>
+    </div>
+    <div class="conn" id="conn" title="Live connection"><span class="dot"></span><span id="conn-text">connecting</span></div>
+  </header>
+
+  <main>
+    <section class="summary" aria-label="Overview">
+      <div class="stat stat-status">
+        <div class="label">Overall status</div>
+        <div id="overall-status" class="pill pill-muted">—</div>
+        <div id="overall-note" class="sub"></div>
+      </div>
+      <div class="stat">
+        <div class="label">Total equity</div>
+        <div id="total-equity" class="value">—</div>
+        <div id="total-balance" class="sub"></div>
+      </div>
+      <div class="stat">
+        <div class="label">Today's P&amp;L</div>
+        <div id="day-pnl" class="value">—</div>
+        <div id="day-pnl-pct" class="sub"></div>
+      </div>
+      <div class="stat">
+        <div class="label">Next high-impact news</div>
+        <div id="news-timer" class="value mono">—</div>
+        <div id="news-title" class="sub"></div>
+      </div>
+    </section>
+
+    <section class="controls" aria-label="Emergency controls">
+      <button id="btn-kill" class="btn btn-danger" type="button">■ KILL SWITCH</button>
+      <button id="btn-resume" class="btn btn-ok" type="button">▶ RESUME</button>
+      <div id="kill-banner" class="banner" hidden>Kill switch active: no new entries on any account.</div>
+    </section>
+
+    <section aria-labelledby="accounts-h">
+      <h2 id="accounts-h">Prop accounts</h2>
+      <div id="accounts" class="cards"></div>
+    </section>
+
+    <section aria-labelledby="trades-h">
+      <div class="section-head">
+        <h2 id="trades-h">Trade history</h2>
+        <div class="filters">
+          <select id="f-account" aria-label="Filter by account"><option value="">All accounts</option></select>
+          <select id="f-status" aria-label="Filter by status">
+            <option value="">All statuses</option>
+            <option>OPEN</option><option>TP</option><option>SL</option><option>NEWS</option>
+            <option>DAILY HALT</option><option>MANUAL</option><option>CLOSED</option>
+          </select>
+          <input id="f-symbol" type="search" placeholder="Symbol" aria-label="Filter by symbol">
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table id="trades">
+          <thead>
+            <tr>
+              <th data-key="time" class="sortable">Time (UTC)</th>
+              <th data-key="account" class="sortable">Account</th>
+              <th data-key="symbol" class="sortable">Symbol</th>
+              <th data-key="side" class="sortable">Side</th>
+              <th data-key="entry" class="sortable num">Entry</th>
+              <th data-key="exit" class="sortable num">Exit</th>
+              <th data-key="size" class="sortable num">Size</th>
+              <th data-key="pnl" class="sortable num">P&amp;L ($)</th>
+              <th data-key="status" class="sortable">Status</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+        <p id="trades-empty" class="empty" hidden>No trades yet.</p>
+      </div>
+    </section>
+
+    <section aria-labelledby="activity-h">
+      <h2 id="activity-h">Activity log</h2>
+      <ul id="activity" class="activity"></ul>
+    </section>
+  </main>
+
+  <div id="modal" class="modal" hidden role="dialog" aria-modal="true" aria-labelledby="modal-title">
+    <div class="modal-box">
+      <h3 id="modal-title">Confirm</h3>
+      <p id="modal-text"></p>
+      <label id="modal-reason-wrap" class="field">Reason
+        <input id="modal-reason" type="text" maxlength="200" placeholder="optional">
+      </label>
+      <div class="modal-actions">
+        <button id="modal-cancel" class="btn" type="button">Cancel</button>
+        <button id="modal-confirm" class="btn btn-danger" type="button">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" hidden role="status" aria-live="polite"></div>
+</body>
+</html>
