@@ -1,0 +1,26 @@
+{
+  "name": "ai-king-trailer",
+  "version": "1.0.0",
+  "private": true,
+  "description": "THE AI KING REVEALED — a 60-second cinematic trailer built with Remotion",
+  "scripts": {
+    "postinstall": "node scripts/generate-placeholder-audio.mjs",
+    "audio": "node scripts/generate-placeholder-audio.mjs",
+    "start": "remotion studio",
+    "build": "remotion render AIKingTrailer out/the-ai-king-revealed.mp4",
+    "build:vertical": "remotion render AIKingTrailerVertical out/the-ai-king-revealed-9x16.mp4",
+    "still": "remotion still AIKingTrailer out/poster-frame.png --frame=1560",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@remotion/cli": "^4.0.0",
+    "@remotion/google-fonts": "^4.0.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "remotion": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.3",
+    "typescript": "^5.5.0"
+  }
+}
