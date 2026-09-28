@@ -1,0 +1,33 @@
+{
+  "fps": 30,
+  "width": 1080,
+  "height": 1920,
+  "seamFrames": 0,
+  "shots": [
+    {"id": "S1-stone-wheel", "startSec": 0, "endSec": 3, "clip": "S1.mp4", "sourceSec": 3, "trimStartFrames": 0, "startKeyframe": "K0.png", "endKeyframe": "K1.png"},
+    {"id": "S2-wood-to-velocipede", "startSec": 3, "endSec": 5, "clip": "S2.mp4", "sourceSec": 2, "trimStartFrames": 1, "startKeyframe": "K1.png", "endKeyframe": "K2.png"},
+    {"id": "S3-motorcycle-build", "startSec": 5, "endSec": 8, "clip": "S3.mp4", "sourceSec": 3, "trimStartFrames": 1, "startKeyframe": "K2.png", "endKeyframe": "K3.png"},
+    {"id": "S4-silver-sports-car", "startSec": 8, "endSec": 11, "clip": "S4.mp4", "sourceSec": 3, "trimStartFrames": 1, "startKeyframe": "K3.png", "endKeyframe": "K4.png"},
+    {"id": "S5-high-speed-train", "startSec": 11, "endSec": 15, "clip": "S5.mp4", "sourceSec": 4, "trimStartFrames": 1, "startKeyframe": "K4.png", "endKeyframe": "K5.png"},
+    {"id": "S6-jet-takeoff", "startSec": 15, "endSec": 20, "clip": "S6.mp4", "sourceSec": 5, "trimStartFrames": 1, "startKeyframe": "K5.png", "endKeyframe": "K6.png"},
+    {"id": "S7-spaceship-ascent", "startSec": 20, "endSec": 25, "clip": "S7.mp4", "sourceSec": 5, "trimStartFrames": 1, "startKeyframe": "K6.png", "endKeyframe": "K7.png"}
+  ],
+  "music": {"file": "audio/music.mp3", "volume": 0.8, "fadeInSec": 0.5, "fadeOutSec": 1.5},
+  "sfx": [
+    {"file": "audio/sfx/wind-dust.mp3", "atSec": 0, "volume": 0.5},
+    {"file": "audio/sfx/stone-roll.mp3", "atSec": 0.2, "volume": 0.9},
+    {"file": "audio/sfx/wood-creak.mp3", "atSec": 3.0, "volume": 0.7},
+    {"file": "audio/sfx/bicycle-chain.mp3", "atSec": 4.0, "volume": 0.6},
+    {"file": "audio/sfx/engine-assemble.mp3", "atSec": 5.2, "volume": 0.7},
+    {"file": "audio/sfx/vintage-engine-start.mp3", "atSec": 7.0, "volume": 0.9},
+    {"file": "audio/sfx/factory-ambience.mp3", "atSec": 8.0, "volume": 0.35},
+    {"file": "audio/sfx/car-rev-pass.mp3", "atSec": 8.4, "volume": 0.9},
+    {"file": "audio/sfx/city-ambience.mp3", "atSec": 11.0, "volume": 0.3},
+    {"file": "audio/sfx/train-whoosh.mp3", "atSec": 11.2, "volume": 0.9},
+    {"file": "audio/sfx/wing-servo.mp3", "atSec": 15.5, "volume": 0.7},
+    {"file": "audio/sfx/jet-takeoff.mp3", "atSec": 16.5, "volume": 1.0},
+    {"file": "audio/sfx/wind-altitude.mp3", "atSec": 19.0, "volume": 0.5},
+    {"file": "audio/sfx/rocket-ignition.mp3", "atSec": 20.6, "volume": 1.0},
+    {"file": "audio/sfx/space-drone.mp3", "atSec": 22.5, "volume": 0.6}
+  ]
+}

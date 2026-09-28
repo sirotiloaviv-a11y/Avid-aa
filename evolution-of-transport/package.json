@@ -1,0 +1,25 @@
+{
+  "name": "evolution-of-transport",
+  "version": "1.0.0",
+  "private": true,
+  "description": "25s vertical cinematic: the evolution of human transport, from stone wheel to spaceship. Remotion edit of AI-generated shots.",
+  "scripts": {
+    "check": "node scripts/check-assets.mjs",
+    "studio": "remotion studio src/index.ts",
+    "render": "node scripts/check-assets.mjs && remotion render src/index.ts Evolution out/evolution-of-transport.mp4 --codec=h264 --crf=16 --audio-codec=aac",
+    "stills": "node scripts/check-assets.mjs && node scripts/render-review-stills.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@remotion/cli": "^4.0.250",
+    "@remotion/renderer": "^4.0.250",
+    "@remotion/bundler": "^4.0.250",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "remotion": "^4.0.250"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "typescript": "^5.6.3"
+  }
+}
