@@ -1,6 +1,6 @@
 # Avid-aa
 
-Two independent security projects.
+Independent projects: two security tools and a product site.
 
 ## [`moat/`](moat/README.md) — security scanner for AI agent configuration
 
@@ -21,3 +21,8 @@ No dependencies. Emits SARIF for GitHub code scanning.
 Monitors Hebrew-language news and Telegram sources for security events, matches
 them against a keyword ruleset that handles Hebrew prefixes, suffixes and
 niqqud, and dispatches alerts.
+
+## [`drip/`](drip/README.md) — DRIP product site
+
+A static product site with a scroll-driven 3D bottle (three.js + GSAP ScrollTrigger)
+and a demo cart. No build step: `cd drip && python3 -m http.server 8000`.

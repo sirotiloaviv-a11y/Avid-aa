@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>DRIP — The Future of Hydration</title>
+  <meta name="description" content="DRIP is a UV-C water bottle designed as one quiet object. Concept storefront.">
+  <meta name="theme-color" content="#F1ECE3">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230b0b0b'/%3E%3Cpath fill='%23f4f1ea' fill-rule='evenodd' d='M18 14h12a18 18 0 0 1 0 36H18Zm8 8v20h4a10 10 0 0 0 0-20Z'/%3E%3C/svg%3E">
+  <link rel="preload" href="fonts/InterDisplay-SemiBold.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="fonts/Inter-Regular.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="modulepreload" href="vendor/three.module.min.js">
+  <link rel="stylesheet" href="styles.css">
+  <script>
+    // Decide the presentation mode before first paint so the page never flashes
+    // between the static and the scroll-driven layout.
+    (function () {
+      var d = document.documentElement;
+      d.classList.add('js');
+      if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) d.classList.add('is-cinematic');
+    })();
+  </script>
+</head>
+<body>
+  <a class="skip" href="#details">Skip to product details</a>
+
+  <!-- Brand geometry shared by the nav, the flat bottle and the footer. -->
+  <svg class="defs" aria-hidden="true" focusable="false">
+    <defs>
+      <path id="drip-mark" fill-rule="evenodd" d="M0 0H40A50 50 0 0 1 40 100H0ZM22 22V78H40A28 28 0 0 0 40 22ZM106 0H150A31 31 0 0 1 150 62H128V100H106ZM128 20V42H150A11 11 0 0 0 150 20ZM146 62H168L190 100H166ZM206 0H228V100H206ZM244 0H288A31 31 0 0 1 288 62H266V100H244ZM266 20V42H288A11 11 0 0 0 288 20Z"/>
+      <linearGradient id="bottle-shade" x1="0" x2="1" y1="0" y2="0">
+        <stop offset="0" stop-color="#000" stop-opacity=".55"/>
+        <stop offset=".18" stop-color="#000" stop-opacity=".12"/>
+        <stop offset=".3" stop-color="#fff" stop-opacity=".16"/>
+        <stop offset=".38" stop-color="#fff" stop-opacity=".04"/>
+        <stop offset=".72" stop-color="#000" stop-opacity=".08"/>
+        <stop offset=".9" stop-color="#fff" stop-opacity=".1"/>
+        <stop offset="1" stop-color="#000" stop-opacity=".5"/>
+      </linearGradient>
+      <linearGradient id="bottle-ring" x1="0" x2="1" y1="0" y2="0">
+        <stop offset="0" stop-color="#6d6d6d"/>
+        <stop offset=".3" stop-color="#f2f2f2"/>
+        <stop offset=".55" stop-color="#9a9a9a"/>
+        <stop offset=".85" stop-color="#d9d9d9"/>
+        <stop offset="1" stop-color="#5a5a5a"/>
+      </linearGradient>
+      <symbol id="bottle-flat" viewBox="0 0 310 1000">
+        <path class="bf-body" d="M0 196H310V965A35 35 0 0 1 275 1000H35A35 35 0 0 1 0 965Z"/>
+        <path class="bf-body bf-cap" d="M0 178V40A40 40 0 0 1 40 0H270A40 40 0 0 1 310 40V178Z"/>
+        <rect x="2" y="178" width="306" height="18" fill="url(#bottle-ring)"/>
+        <path d="M0 196H310V965A35 35 0 0 1 275 1000H35A35 35 0 0 1 0 965Z" fill="url(#bottle-shade)"/>
+        <path d="M0 178V40A40 40 0 0 1 40 0H270A40 40 0 0 1 310 40V178Z" fill="url(#bottle-shade)"/>
+        <use href="#drip-mark" class="bf-ink" transform="translate(28 461) scale(.8)"/>
+      </symbol>
+    </defs>
+  </svg>
+
+  <header class="nav" data-nav>
+    <a class="nav-logo" href="#top" aria-label="DRIP, back to top">
+      <svg viewBox="0 0 320 100" aria-hidden="true"><use href="#drip-mark"/></svg>
+    </a>
+    <nav class="nav-links" aria-label="Primary">
+      <a href="#top">Overview</a>
+      <a href="#details">Details</a>
+      <a href="#specs" class="hide-sm">Specs</a>
+    </nav>
+    <button class="nav-cart" type="button" data-cart-open aria-haspopup="dialog">
+      Cart <span class="nav-cart-count" data-cart-count>0</span>
+    </button>
+  </header>
+
+  <main id="top">
+    <!-- Scroll-driven product story. Without JS or with reduced motion it renders as plain sections. -->
+    <section class="experience" data-experience aria-label="The DRIP bottle">
+      <div class="stage" data-stage>
+        <svg class="stage-shape" data-shape aria-hidden="true" preserveAspectRatio="none"><path/></svg>
+
+        <div class="bottle-layer" aria-hidden="true">
+          <canvas class="bottle-canvas" data-canvas></canvas>
+          <svg class="bottle-flat" data-flat viewBox="0 0 310 1000"><use href="#bottle-flat"/></svg>
+        </div>
+
+        <div class="beat beat-hero" data-beat="hero">
+          <p class="eyebrow"><span class="ln"><span class="ln-i">Introducing DRIP</span></span></p>
+          <h1 class="display">
+            <span class="ln"><span class="ln-i">The Future</span></span>
+            <span class="ln"><span class="ln-i">of Hydration</span></span>
+          </h1>
+          <p class="lede"><span class="ln"><span class="ln-i">A UV-C water bottle, designed as one quiet object.</span></span></p>
+          <p class="scroll-cue" aria-hidden="true"><span class="scroll-cue-line"></span>Scroll</p>
+        </div>
+
+        <div class="beat beat-uvc" data-beat="uvc">
+          <h2 class="uvc-title">
+            <span class="uvc-left"><span class="ln"><span class="ln-i">UV-C</span></span></span>
+            <span class="uvc-right">
+              <span class="ln"><span class="ln-i">Water</span></span>
+              <span class="ln"><span class="ln-i">Bottle</span></span>
+            </span>
+          </h2>
+          <p class="uvc-caption"><span class="ln"><span class="ln-i">Light in the cap. Nothing extra in your hand.</span></span></p>
+        </div>
+
+        <div class="beat beat-features" data-beat="features">
+          <ol class="features">
+            <li class="feature" data-feature>
+              <p class="feature-index"><span class="ln"><span class="ln-i">01 / 03 — The cap</span></span></p>
+              <h3 class="feature-title"><span class="ln"><span class="ln-i">UV-C, built into the lid.</span></span></h3>
+              <p class="feature-text"><span class="ln"><span class="ln-i">The light module lives inside the cap, so the bottle keeps a single, uninterrupted silhouette.</span></span></p>
+            </li>
+            <li class="feature" data-feature>
+              <p class="feature-index"><span class="ln"><span class="ln-i">02 / 03 — The form</span></span></p>
+              <h3 class="feature-title"><span class="ln"><span class="ln-i">One continuous line.</span></span></h3>
+              <p class="feature-text"><span class="ln"><span class="ln-i">A straight matte body with softened ends and a thin metal seam where cap meets bottle.</span></span></p>
+            </li>
+            <li class="feature" data-feature>
+              <p class="feature-index"><span class="ln"><span class="ln-i">03 / 03 — The mark</span></span></p>
+              <h3 class="feature-title"><span class="ln"><span class="ln-i">DRIP, and nothing else.</span></span></h3>
+              <p class="feature-text"><span class="ln"><span class="ln-i">One white wordmark. No badges, no icons, no clutter on the surface you hold every day.</span></span></p>
+            </li>
+          </ol>
+        </div>
+
+        <div class="beat beat-buy" data-beat="buy">
+          <p class="eyebrow">The DRIP Bottle</p>
+          <h2 class="buy-title">Choose your color.</h2>
+          <fieldset class="swatches" data-swatches="hero">
+            <legend class="sr-only">Color</legend>
+          </fieldset>
+          <p class="buy-meta"><span data-color-name>Onyx</span> · <span data-price></span> <span class="muted">placeholder price</span></p>
+          <div class="buy-actions">
+            <button class="btn btn-light" type="button" data-shop>Shop the Bottle</button>
+            <a class="link-light" href="#details">Details</a>
+          </div>
+        </div>
+
+        <div class="rail" aria-hidden="true"><span class="rail-fill" data-rail></span></div>
+      </div>
+    </section>
+
+    <section class="details" id="details" aria-labelledby="details-title">
+      <div class="details-figure">
+        <div class="details-slab"></div>
+        <svg class="details-bottle" data-details-bottle viewBox="0 0 310 1000" role="img" aria-label="DRIP bottle in the selected color"><use href="#bottle-flat"/></svg>
+      </div>
+      <div class="details-body">
+        <p class="eyebrow">The DRIP Bottle</p>
+        <h2 id="details-title" class="h2">One object.<br>Every day.</h2>
+        <p class="body-lg">A UV-C water bottle reduced to its outline: a straight matte body, a UV-C cap and a single wordmark. Nothing to learn, nothing to decode.</p>
+
+        <fieldset class="swatches swatches-dark" data-swatches="details">
+          <legend class="label">Color — <span data-color-name>Onyx</span></legend>
+        </fieldset>
+
+        <div class="purchase">
+          <div class="qty" role="group" aria-label="Quantity">
+            <button type="button" data-qty-dec aria-label="Decrease quantity">−</button>
+            <output data-qty aria-live="polite">1</output>
+            <button type="button" data-qty-inc aria-label="Increase quantity">+</button>
+          </div>
+          <button class="btn btn-dark" type="button" data-add>Add to cart — <span data-price-total></span></button>
+        </div>
+        <p class="fine">Prices on this site are placeholders. This is a concept storefront: no checkout or payment provider is connected.</p>
+
+        <dl class="specs" id="specs">
+          <div><dt>Cap</dt><dd>UV-C light module</dd></div>
+          <div><dt>Finish</dt><dd>Matte body, metal seam ring</dd></div>
+          <div><dt>Mark</dt><dd>DRIP wordmark, single print</dd></div>
+          <div><dt>Colors</dt><dd data-color-list></dd></div>
+          <div><dt>Capacity, materials, UV-C data</dt><dd>Published with the final product listing</dd></div>
+        </dl>
+      </div>
+    </section>
+
+    <section class="statement" aria-label="Statement">
+      <p class="statement-text">Made to be the one thing<br>you never leave behind.</p>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <svg class="footer-mark" viewBox="0 0 320 100" role="img" aria-label="DRIP"><use href="#drip-mark"/></svg>
+    <div class="footer-cols">
+      <nav aria-label="Footer">
+        <p class="label">Site</p>
+        <a href="#top">Overview</a>
+        <a href="#details">Details</a>
+        <a href="#specs">Specs</a>
+      </nav>
+      <div>
+        <p class="label">Shop</p>
+        <button type="button" class="footer-link" data-cart-open>Cart</button>
+      </div>
+      <p class="footer-note">Concept storefront. No real orders are placed and no payments are processed.</p>
+    </div>
+    <p class="footer-legal">© 2026 DRIP</p>
+  </footer>
+
+  <div class="scrim" data-scrim hidden></div>
+  <aside class="cart" data-cart role="dialog" aria-modal="true" aria-labelledby="cart-title" hidden>
+    <div class="cart-head">
+      <h2 id="cart-title" class="cart-title">Cart</h2>
+      <button type="button" class="cart-close" data-cart-close aria-label="Close cart">Close</button>
+    </div>
+    <ul class="cart-items" data-cart-items></ul>
+    <p class="cart-empty" data-cart-empty>Your cart is empty.</p>
+    <div class="cart-foot" data-cart-foot>
+      <p class="cart-row"><span>Subtotal</span><span data-cart-subtotal></span></p>
+      <button type="button" class="btn btn-dark btn-block" data-checkout>Checkout</button>
+      <p class="cart-notice" data-checkout-notice role="status" hidden>Checkout isn't connected in this demo. No order was placed and no payment was taken.</p>
+      <p class="fine">Placeholder prices. Taxes and shipping are not calculated.</p>
+    </div>
+  </aside>
+
+  <p class="toast" data-toast role="status" aria-live="polite"></p>
+
+  <script src="vendor/gsap.min.js" defer></script>
+  <script src="vendor/ScrollTrigger.min.js" defer></script>
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
