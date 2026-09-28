@@ -142,7 +142,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
   display: flex;
   align-items: center;
   gap: 32px;
-  padding: 22px var(--gutter);
+  padding: calc(22px + env(safe-area-inset-top, 0px)) var(--gutter) 22px;
   color: #fff;
   mix-blend-mode: difference;
   pointer-events: none;
