@@ -1,0 +1,884 @@
+<title>מ־18 ל־30</title>
+<meta name="description" content="אנימציית תלת־ממד: המסע הכלכלי של צעיר ישראלי מגיל 18 ועד 30">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Assistant:wght@400;600;800&family=Karantina:wght@400;700&display=swap">
+<style>
+/* Layout: one full-bleed 3D stage; HUD pinned to its corners like a broadcast lower-third. */
+:root {
+  --ink: #070b16;          /* stage ground */
+  --paper: #eef3fb;        /* primary text */
+  --muted: #93a0bb;        /* secondary text */
+  --gain: #3ee28a;         /* net worth above zero */
+  --loss: #ff5d73;         /* net worth below zero */
+  --cash: #52c7f2;         /* bank balance */
+  --gold: #ffc94a;         /* coins, highlights */
+  --glass: rgba(10, 16, 32, .62);
+  --line: rgba(238, 243, 251, .14);
+  --display: "Karantina", "Liberation Sans", "DejaVu Sans", "Arial Hebrew", sans-serif;
+  --body: "Assistant", "Liberation Sans", "DejaVu Sans", "Arial Hebrew", sans-serif;
+  color-scheme: dark;
+}
+html, body { height: 100%; }
+[hidden] { display: none !important; }
+body {
+  margin: 0; background: var(--ink); color: var(--paper);
+  font-family: var(--body); overflow: hidden;
+}
+#stage { position: fixed; inset: 0; }
+#scene { width: 100%; height: 100%; display: block; }
+
+.hud { position: absolute; pointer-events: none; }
+.top {
+  top: calc(env(safe-area-inset-top, 0px) + 16px); inset-inline: 16px;
+  display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap;
+}
+.age-block { display: grid; gap: 2px; }
+.chapter-name {
+  font-size: 13px; font-weight: 800; letter-spacing: .08em; color: var(--gold);
+  text-transform: uppercase;
+}
+.age {
+  font-family: var(--display); font-weight: 700; line-height: .85;
+  font-size: clamp(64px, 11vw, 132px); letter-spacing: .01em;
+  text-shadow: 0 4px 30px rgba(0,0,0,.45);
+}
+.age small { font-size: .42em; color: var(--muted); margin-inline-start: .2em; font-weight: 400; }
+
+.stats {
+  background: var(--glass); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px;
+  display: grid; gap: 8px; min-width: 0;
+}
+.stat { display: grid; grid-template-columns: auto 1fr; align-items: baseline; column-gap: 10px; }
+.stat .k { font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+.stat .k i { width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
+.stat .v {
+  font-family: var(--display); font-size: clamp(30px, 4.4vw, 44px); line-height: 1;
+  font-variant-numeric: tabular-nums; text-align: end;
+}
+#nw { color: var(--gain); }
+#nw.neg { color: var(--loss); }
+#bank { color: var(--cash); }
+
+.bottom {
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 16px); inset-inline: 16px;
+  display: grid; gap: 12px;
+}
+.sub {
+  justify-self: start; max-width: 62ch;
+  background: var(--glass); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  border-inline-start: 3px solid var(--gold); border-radius: 6px;
+  padding: 10px 14px; font-size: clamp(16px, 2.1vw, 22px); font-weight: 600; line-height: 1.35;
+  text-wrap: balance;
+}
+.sub.flash { animation: subIn .5s ease-out; }
+@keyframes subIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+.controls { display: flex; gap: 10px; align-items: stretch; pointer-events: auto; }
+.btn {
+  flex: none; width: 44px; border-radius: 10px; border: 1px solid var(--line);
+  background: var(--glass); color: var(--paper); cursor: pointer; display: grid; place-items: center;
+}
+.btn:hover { border-color: var(--gold); }
+.btn:focus-visible, .seg:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.btn svg { width: 18px; height: 18px; fill: currentColor; }
+.track { flex: 1; display: flex; gap: 4px; min-width: 0; direction: ltr; }
+.seg {
+  position: relative; border: 0; padding: 8px 8px 6px; border-radius: 8px; cursor: pointer;
+  background: var(--glass); color: var(--muted); text-align: start; overflow: hidden; min-width: 0;
+  font: 600 13px var(--body); direction: rtl;
+}
+.seg span { position: relative; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.seg .yrs { font-weight: 400; font-size: 11px; opacity: .8; font-variant-numeric: tabular-nums; }
+.seg .fill { position: absolute; inset: auto 0 0 0; height: 3px; background: var(--gold); transform-origin: left; transform: scaleX(0); }
+.seg.on { color: var(--paper); }
+
+.card {
+  position: absolute; inset: 0; display: grid; place-content: center; text-align: center;
+  pointer-events: none; opacity: 0; padding-inline: 16px;
+  background: radial-gradient(ellipse 60% 55% at 50% 50%, rgba(7,11,22,.78), rgba(7,11,22,.35) 70%, rgba(7,11,22,0));
+}
+.card h1 {
+  margin: 0; font-family: var(--display); font-weight: 700; line-height: .9;
+  font-size: clamp(80px, 15vw, 190px); text-shadow: 0 8px 50px rgba(0,0,0,.5);
+}
+.card p { margin: 6px 0 0; font-size: clamp(18px, 2.6vw, 28px); font-weight: 600; color: var(--paper); }
+.card .eyebrow { font-size: 13px; letter-spacing: .14em; font-weight: 800; color: var(--gold); }
+#endCard h1 { color: var(--gain); font-size: clamp(64px, 11vw, 150px); }
+.num { direction: ltr; unicode-bidi: isolate; display: inline-block; }
+
+body.rec .controls { display: none; }
+
+@media (max-width: 640px) {
+  .stats { padding: 8px 12px; }
+  .seg { font-size: 11px; padding: 6px 6px 5px; }
+  .seg .yrs { display: none; }
+}
+</style>
+
+<div id="stage" dir="rtl">
+  <canvas id="scene" aria-label="אנימציה: גרף השווי הנקי והיתרה בבנק של צעיר ישראלי מגיל 18 עד 30"></canvas>
+
+  <div class="hud top">
+    <div class="age-block">
+      <div class="chapter-name" id="chapName">צבא</div>
+      <div class="age"><span id="age" class="num">18</span><small>גיל</small></div>
+    </div>
+    <div class="stats">
+      <div class="stat"><span class="k"><i style="background:var(--gain)"></i>שווי נקי</span><span class="v num" id="nw">₪0</span></div>
+      <div class="stat"><span class="k"><i style="background:var(--cash)"></i>יתרה בבנק</span><span class="v num" id="bank">₪0</span></div>
+    </div>
+  </div>
+
+  <div class="hud bottom">
+    <div class="sub" id="sub">מתגייס. משכורת צבאית קטנה, ורוב השקלים נשמרים בצד.</div>
+    <div class="controls">
+      <button class="btn" id="play" aria-label="השהה">
+        <svg viewBox="0 0 24 24" id="icoPause"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>
+        <svg viewBox="0 0 24 24" id="icoPlay" hidden><path d="M7 5l12 7-12 7z"/></svg>
+      </button>
+      <div class="track" id="track"></div>
+      <button class="btn" id="restart" aria-label="מההתחלה">
+        <svg viewBox="0 0 24 24"><path d="M12 5V2L7 6l5 4V7a5 5 0 1 1-5 5H5a7 7 0 1 0 7-7z"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <div class="card" id="titleCard">
+    <div class="eyebrow">המסע הכלכלי של נועם</div>
+    <h1><span class="num">18 → 30</span></h1>
+    <p>צבא, טיול, תואר, הייטק. מה קורה לכסף בדרך?</p>
+  </div>
+  <div class="card" id="endCard">
+    <div class="eyebrow">גיל 30</div>
+    <h1><span class="num">+₪170K</span></h1>
+    <p>שווי נקי חיובי. הזמן וההרגלים עשו את שלהם.</p>
+  </div>
+</div>
+
+<script>
+(() => {
+'use strict';
+const REC = location.hash === '#record';
+if (REC) document.body.classList.add('rec');
+const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* ---------------- story data ---------------- */
+// Illustrative figures in thousands of shekels.
+function monotone(xs, ys) {
+  const n = xs.length, d = [], m = new Array(n);
+  for (let i = 0; i < n - 1; i++) d[i] = (ys[i + 1] - ys[i]) / (xs[i + 1] - xs[i]);
+  m[0] = d[0]; m[n - 1] = d[n - 2];
+  for (let i = 1; i < n - 1; i++) m[i] = d[i - 1] * d[i] <= 0 ? 0 : (d[i - 1] + d[i]) / 2;
+  for (let i = 0; i < n - 1; i++) {
+    if (d[i] === 0) { m[i] = m[i + 1] = 0; continue; }
+    const a = m[i] / d[i], b = m[i + 1] / d[i], s = a * a + b * b;
+    if (s > 9) { const t = 3 / Math.sqrt(s); m[i] = t * a * d[i]; m[i + 1] = t * b * d[i]; }
+  }
+  return x => {
+    if (x <= xs[0]) return ys[0];
+    if (x >= xs[n - 1]) return ys[n - 1];
+    let i = 0; while (x > xs[i + 1]) i++;
+    const h = xs[i + 1] - xs[i], t = (x - xs[i]) / h, t2 = t * t, t3 = t2 * t;
+    return (2*t3 - 3*t2 + 1) * ys[i] + (t3 - 2*t2 + t) * h * m[i] + (-2*t3 + 3*t2) * ys[i + 1] + (t3 - t2) * h * m[i + 1];
+  };
+}
+const netWorth = monotone(
+  [18, 19, 20, 21, 21.5, 22, 22.6, 23, 24, 25, 26, 27, 27.5, 28, 28.5, 29, 29.5, 30],
+  [0.5, 6, 14, 24, 41, 30, 14, 7, 4, 0, -10, -18, -20, 2, 25, 70, 115, 170]);
+const bankBal = monotone(
+  [18, 19, 20, 21, 21.5, 22, 22.6, 23, 24, 25, 26, 27, 27.5, 28, 28.5, 29, 29.5, 30],
+  [0.5, 4, 8, 12, 32, 22, 8, 3, 6, 4, 5, 3, 2, 6, 14, 24, 36, 48]);
+
+// timeline: seconds -> age
+const TK = [[0, 18], [2.4, 18], [9, 21.5], [16, 23], [25, 27.5], [33, 30], [39, 30]];
+const T_END = 39;
+function ageAt(t) {
+  for (let i = 0; i < TK.length - 1; i++) {
+    const [t0, a0] = TK[i], [t1, a1] = TK[i + 1];
+    if (t <= t1) return a0 + (a1 - a0) * Math.max(0, (t - t0) / (t1 - t0));
+  }
+  return 30;
+}
+const CHAPTERS = [
+  { id: 'army', name: 'צבא', yrs: '18–21', t0: 0, t1: 9,
+    sky: [[18, 44, 52], [74, 104, 84]], sun: [255, 214, 140] },
+  { id: 'trip', name: 'הטיול הגדול', yrs: '22', t0: 9, t1: 16,
+    sky: [[42, 22, 70], [240, 120, 90]], sun: [255, 170, 110] },
+  { id: 'uni', name: 'אוניברסיטה', yrs: '23–27', t0: 16, t1: 25,
+    sky: [[14, 18, 52], [70, 70, 150]], sun: [200, 190, 255] },
+  { id: 'tech', name: 'הייטק', yrs: '28–30', t0: 25, t1: T_END,
+    sky: [[6, 16, 40], [30, 110, 170]], sun: [140, 230, 255] },
+];
+const chapterAt = t => CHAPTERS.findIndex(c => t < c.t1) === -1 ? 3 : CHAPTERS.findIndex(c => t < c.t1);
+const EVENTS = [
+  [18, 'מתגייס. משכורת צבאית קטנה, ורוב השקלים נשמרים בצד.'],
+  [19.6, 'שנה שנייה בשירות. החיסכון גדל לאט אבל בעקביות.'],
+  [21.2, 'שחרור! הפיקדון ומענק השחרור נכנסים לחשבון.'],
+  [21.6, 'הטיול הגדול: תרמיל על הגב וכרטיס לדרום אמריקה.'],
+  [22.3, 'חצי שנה בדרכים. היתרה בבנק יורדת מהר.'],
+  [23.05, 'חוזר הביתה ומתחיל תואר במדעי המחשב.'],
+  [24.6, 'שכר לימוד, שכירות ומשמרות ערב. השווי הנקי זוחל למטה.'],
+  [26.2, 'הלוואת סטודנטים מורידה את השווי הנקי למינוס. זו השקעה בעצמו.'],
+  [27.55, 'תואר ביד. משרה ראשונה בחברת הייטק בתל אביב.'],
+  [28.6, 'משכורת מלאה, קרן השתלמות והוראת קבע לתיק השקעות.'],
+  [29.7, 'גיל 30: שווי נקי חיובי, והגרף רק מטפס.'],
+];
+
+/* ---------------- tiny 3D engine (canvas 2D, flat shaded) ---------------- */
+const canvas = document.getElementById('scene');
+const ctx = canvas.getContext('2d');
+let W = 0, H = 0, DPR = 1, F = 1;
+const FOV = 50 * Math.PI / 180;
+
+function affTRS(p, r, s) {
+  const cx = Math.cos(r[0]), sx = Math.sin(r[0]), cy = Math.cos(r[1]), sy = Math.sin(r[1]), cz = Math.cos(r[2]), sz = Math.sin(r[2]);
+  // R = Ry * Rx * Rz
+  const R = [
+    cy*cz + sy*sx*sz, -cy*sz + sy*sx*cz, sy*cx,
+    cx*sz, cx*cz, -sx,
+    -sy*cz + cy*sx*sz, sy*sz + cy*sx*cz, cy*cx];
+  return [
+    R[0]*s[0], R[1]*s[1], R[2]*s[2], p[0],
+    R[3]*s[0], R[4]*s[1], R[5]*s[2], p[1],
+    R[6]*s[0], R[7]*s[1], R[8]*s[2], p[2]];
+}
+function affMul(A, B) {
+  const o = new Array(12);
+  for (let i = 0; i < 3; i++) {
+    for (let j = 0; j < 3; j++) o[i*4+j] = A[i*4]*B[j] + A[i*4+1]*B[4+j] + A[i*4+2]*B[8+j];
+    o[i*4+3] = A[i*4]*B[3] + A[i*4+1]*B[7] + A[i*4+2]*B[11] + A[i*4+3];
+  }
+  return o;
+}
+const I_AFF = [1,0,0,0, 0,1,0,0, 0,0,1,0];
+
+// material: mutable color so outfits can swap
+const mat = (hex, opts = {}) => ({ c: hexRGB(hex), ...opts });
+function hexRGB(h) { return [(h >> 16) & 255, (h >> 8) & 255, h & 255]; }
+
+// geometry with faces wound outward (fixed against the centroid, valid for convex shapes)
+function geo(verts, faces, twoSided = false) {
+  let cx = 0, cy = 0, cz = 0;
+  verts.forEach(v => { cx += v[0]; cy += v[1]; cz += v[2]; });
+  cx /= verts.length; cy /= verts.length; cz /= verts.length;
+  if (!twoSided) faces = faces.map(f => {
+    const [a, b, c] = [verts[f[0]], verts[f[1]], verts[f[2]]];
+    const u = [b[0]-a[0], b[1]-a[1], b[2]-a[2]], v = [c[0]-a[0], c[1]-a[1], c[2]-a[2]];
+    const n = [u[1]*v[2]-u[2]*v[1], u[2]*v[0]-u[0]*v[2], u[0]*v[1]-u[1]*v[0]];
+    let fx = 0, fy = 0, fz = 0; f.forEach(i => { fx += verts[i][0]; fy += verts[i][1]; fz += verts[i][2]; });
+    fx = fx / f.length - cx; fy = fy / f.length - cy; fz = fz / f.length - cz;
+    return n[0]*fx + n[1]*fy + n[2]*fz < 0 ? f.slice().reverse() : f;
+  });
+  return { verts, faces, twoSided };
+}
+function boxG(w, h, d) {
+  const x = w/2, y = h/2, z = d/2;
+  const v = [[-x,-y,-z],[x,-y,-z],[x,y,-z],[-x,y,-z],[-x,-y,z],[x,-y,z],[x,y,z],[-x,y,z]];
+  return geo(v, [[0,1,2,3],[4,5,6,7],[0,1,5,4],[2,3,7,6],[1,2,6,5],[0,3,7,4]]);
+}
+function cylG(rt, rb, h, n) {
+  const v = [], f = [], top = [], bot = [];
+  for (let i = 0; i < n; i++) {
+    const a = i / n * Math.PI * 2 + Math.PI / n;
+    v.push([Math.cos(a)*rt, h/2, Math.sin(a)*rt]);
+    v.push([Math.cos(a)*rb, -h/2, Math.sin(a)*rb]);
+  }
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    f.push([i*2, j*2, j*2+1, i*2+1]); top.push(i*2); bot.push(i*2+1);
+  }
+  if (rt > 0.001) f.push(top); if (rb > 0.001) f.push(bot);
+  return geo(v, f);
+}
+function coneG(r, h, n) {
+  const v = [[0, h, 0]], f = [], base = [];
+  for (let i = 0; i < n; i++) { const a = i / n * Math.PI * 2; v.push([Math.cos(a)*r, 0, Math.sin(a)*r]); }
+  for (let i = 0; i < n; i++) { f.push([0, 1 + i, 1 + (i + 1) % n]); base.push(1 + i); }
+  f.push(base);
+  return geo(v, f);
+}
+function sphereG(r, ws, hs, hsMax = hs) {
+  const v = [], f = [];
+  for (let j = 0; j <= hsMax; j++) {
+    const phi = j / hs * Math.PI;
+    for (let i = 0; i < ws; i++) {
+      const th = i / ws * Math.PI * 2;
+      v.push([Math.sin(phi)*Math.cos(th)*r, Math.cos(phi)*r, Math.sin(phi)*Math.sin(th)*r]);
+    }
+  }
+  for (let j = 0; j < hsMax; j++) for (let i = 0; i < ws; i++) {
+    const a = j*ws + i, b = j*ws + (i+1)%ws, c = (j+1)*ws + (i+1)%ws, d = (j+1)*ws + i;
+    if (j === 0) f.push([a, c, d]); else if (j === hs - 1) f.push([a, b, c]); else f.push([a, b, c, d]);
+  }
+  if (hsMax < hs) { const ring = []; for (let i = 0; i < ws; i++) ring.push(hsMax*ws + i); f.push(ring); }
+  return geo(v, f);
+}
+function quadG(w, h) { return geo([[-w/2,-h/2,0],[w/2,-h/2,0],[w/2,h/2,0],[-w/2,h/2,0]], [[0,1,2,3]], true); }
+function triG(r) {
+  const v = []; for (let i = 0; i < 3; i++) { const a = Math.PI/2 + i * Math.PI*2/3; v.push([Math.cos(a)*r, Math.sin(a)*r, 0]); }
+  return geo(v, [[0,1,2]], true);
+}
+
+class Node {
+  constructor(g = null, m = null, o = {}) {
+    this.g = g; this.m = m; this.children = []; this.visible = true;
+    this.pos = o.pos || [0,0,0]; this.rot = o.rot || [0,0,0]; this.scl = o.scl || [1,1,1];
+    this.layer = o.layer || 'near'; this.stroke = o.stroke || 0; this.glow = o.glow || 0;
+  }
+  add(...n) { n.forEach(c => this.children.push(c)); return this; }
+}
+const N = (g, m, o) => new Node(g, m, o);
+const G = (o, ...kids) => new Node(null, null, o).add(...kids);
+
+/* ---------------- camera & rendering ---------------- */
+const cam = { eye: [0, 3.3, 10.5], tgt: [0, 3.2, -2], r: [1,0,0], u: [0,1,0], f: [0,0,-1] };
+function camUpdate() {
+  const e = cam.eye, t = cam.tgt;
+  let f = [t[0]-e[0], t[1]-e[1], t[2]-e[2]]; const fl = Math.hypot(...f); f = f.map(x => x / fl);
+  let r = [f[1]*0 - f[2]*1, f[2]*0 - f[0]*0, f[0]*1 - f[1]*0]; // f x up(0,1,0)
+  r = [-f[2], 0, f[0]]; const rl = Math.hypot(...r); r = r.map(x => x / rl);
+  const u = [r[1]*f[2]-r[2]*f[1], r[2]*f[0]-r[0]*f[2], r[0]*f[1]-r[1]*f[0]];
+  cam.f = f; cam.r = r; cam.u = u;
+}
+function toView(p) {
+  const d = [p[0]-cam.eye[0], p[1]-cam.eye[1], p[2]-cam.eye[2]];
+  return [d[0]*cam.r[0]+d[1]*cam.r[1]+d[2]*cam.r[2], d[0]*cam.u[0]+d[1]*cam.u[1]+d[2]*cam.u[2], d[0]*cam.f[0]+d[1]*cam.f[1]+d[2]*cam.f[2]];
+}
+function project(p) {
+  const v = toView(p);
+  return [W/2 + v[0]/v[2]*F, H/2 - v[1]/v[2]*F, v[2]];
+}
+const LIGHT = (() => { const l = [-0.45, 0.8, 0.55], n = Math.hypot(...l); return l.map(x => x / n); })();
+let tint = [255, 220, 170];
+
+const polys = { ground: [], far: [], near: [] };
+function collect(node, parent) {
+  if (!node.visible) return;
+  const M = affMul(parent, affTRS(node.pos, node.rot, node.scl));
+  if (node.g) {
+    const g = node.g, wv = g.verts.map(v => [
+      M[0]*v[0]+M[1]*v[1]+M[2]*v[2]+M[3], M[4]*v[0]+M[5]*v[1]+M[6]*v[2]+M[7], M[8]*v[0]+M[9]*v[1]+M[10]*v[2]+M[11]]);
+    const pv = wv.map(project);
+    for (const f of g.faces) {
+      let bad = false;
+      for (const i of f) if (pv[i][2] < 0.25) { bad = true; break; }
+      if (bad) continue;
+      const a = wv[f[0]], b = wv[f[1]], c = wv[f[2]];
+      const u = [b[0]-a[0], b[1]-a[1], b[2]-a[2]], v = [c[0]-a[0], c[1]-a[1], c[2]-a[2]];
+      let n = [u[1]*v[2]-u[2]*v[1], u[2]*v[0]-u[0]*v[2], u[0]*v[1]-u[1]*v[0]];
+      const nl = Math.hypot(...n) || 1; n = n.map(x => x / nl);
+      const toCam = [cam.eye[0]-a[0], cam.eye[1]-a[1], cam.eye[2]-a[2]];
+      const facing = n[0]*toCam[0] + n[1]*toCam[1] + n[2]*toCam[2];
+      if (facing <= 0) { if (!g.twoSided) continue; n = n.map(x => -x); }
+      let z = 0; for (const i of f) z += pv[i][2]; z /= f.length;
+      const base = node.m.c, emis = node.m.emis || 0;
+      const k = emis ? 1 : 0.42 + 0.58 * Math.max(0, n[0]*LIGHT[0] + n[1]*LIGHT[1] + n[2]*LIGHT[2]) + 0.1 * n[1];
+      const col = [0,1,2].map(i => Math.min(255, base[i] * k * (emis ? 1 : 0.86 + 0.14 * tint[i] / 255)) | 0);
+      polys[node.layer].push({ z, pts: f.map(i => pv[i]), col, a: node.m.a ?? 1, stroke: node.stroke, glow: node.glow });
+    }
+  }
+  for (const c of node.children) collect(c, M);
+}
+function drawPoly(p) {
+  ctx.beginPath();
+  ctx.moveTo(p.pts[0][0], p.pts[0][1]);
+  for (let i = 1; i < p.pts.length; i++) ctx.lineTo(p.pts[i][0], p.pts[i][1]);
+  ctx.closePath();
+  const c = `rgba(${p.col[0]},${p.col[1]},${p.col[2]},${p.a})`;
+  if (p.glow) { ctx.shadowColor = c; ctx.shadowBlur = p.glow * DPR; }
+  if (p.stroke) { ctx.lineWidth = p.stroke * F / p.z; ctx.strokeStyle = c; ctx.lineJoin = 'round'; ctx.stroke(); }
+  else { ctx.fillStyle = c; ctx.fill(); if (p.a === 1) { ctx.lineWidth = 0.6; ctx.strokeStyle = c; ctx.stroke(); } }
+  if (p.glow) ctx.shadowBlur = 0;
+}
+
+/* ---------------- world ---------------- */
+const scene = G({});
+const GX = age => -9 + (age - 18) / 12 * 18;
+const VMIN = -40, VMAX = 180, GY0 = 2.9, GH = 4.4, GZ = -4;
+const GY = v => GY0 + (v - VMIN) / (VMAX - VMIN) * GH;
+const CHAR_Z = 1.3;
+
+// ground strips per chapter
+const regions = [[-12, GX(21.5), 0x6f7446], [GX(21.5), GX(23), 0xb07a52], [GX(23), GX(27.5), 0x566079], [GX(27.5), 12.5, 0x2c3e5c]];
+regions.forEach(([a, b, col]) => {
+  scene.add(N(boxG(b - a, 0.5, 9), mat(col), { pos: [(a + b) / 2, -0.25, -1.5], layer: 'ground' }));
+  scene.add(N(boxG(b - a, 0.02, 1.1), mat(col + 0x141414), { pos: [(a + b) / 2, 0.01, CHAR_Z], layer: 'ground' }));
+});
+
+// --- army props
+const olive = 0x55613a, sand = 0xc9b27e;
+scene.add(N(coneG(1.25, 1.4, 4), mat(0x4b5530), { pos: [-7.9, 0, -2], rot: [0, Math.PI / 4, 0] }));
+scene.add(N(boxG(0.3, 0.8, 0.02), mat(0x2a2f1c), { pos: [-7.9, 0.4, -1.12] }));
+for (let r = 0; r < 3; r++) for (let i = 0; i < 3 - r; i++)
+  scene.add(N(boxG(0.52, 0.22, 0.34), mat(sand - r * 0x060606), { pos: [-5.3 + i * 0.54 + r * 0.27, 0.11 + r * 0.22, -1.1], rot: [0, 0.04 * (i - 1), 0] }));
+for (let i = 0; i < 9; i++) scene.add(N(boxG(0.07, 0.9, 0.07), mat(0x3b3a30), { pos: [-10.5 + i * 0.75, 0.45, -3.3] }));
+scene.add(N(boxG(6.1, 0.03, 0.03), mat(0x77766a), { pos: [-7.5, 0.75, -3.3] }));
+scene.add(N(boxG(6.1, 0.03, 0.03), mat(0x77766a), { pos: [-7.5, 0.45, -3.3] }));
+const flag = G({ pos: [-6.5, 0, -2.4] },
+  N(cylG(0.03, 0.035, 3.1, 6), mat(0xcfd3d6), { pos: [0, 1.55, 0] }),
+  G({ pos: [0.5, 2.72, 0], rot: [0, 0.25, 0] },
+    N(quadG(0.92, 0.64), mat(0xf6f7f9)),
+    N(quadG(0.92, 0.08), mat(0x1f4fbf), { pos: [0, 0.22, 0.004] }),
+    N(quadG(0.92, 0.08), mat(0x1f4fbf), { pos: [0, -0.22, 0.004] }),
+    N(triG(0.13), mat(0x1f4fbf), { pos: [0, 0, 0.006], stroke: 0.028 }),
+    N(triG(0.13), mat(0x1f4fbf), { pos: [0, 0, 0.006], rot: [0, 0, Math.PI], stroke: 0.028 })));
+scene.add(flag);
+
+// --- trip props
+const mountains = [[-6.8, 4.2, 2.6], [-4.6, 5.6, 3.2], [-2.3, 4.6, 2.8], [-0.4, 3.6, 2.3], [-8.8, 3.2, 2.0]];
+mountains.forEach(([x, h, r], i) => {
+  scene.add(N(coneG(r, h, 5), mat(i % 2 ? 0x5b4b8a : 0x6b5b9a), { pos: [x, 0, -10 - (i % 2)], rot: [0, i, 0], layer: 'far' }));
+  scene.add(N(coneG(r * 0.32, h * 0.32, 5), mat(0xf4f1ff), { pos: [x, h * 0.68, -10 - (i % 2)], rot: [0, i, 0], layer: 'far' }));
+});
+const sign = G({ pos: [-2.2, 0, -1.3] },
+  N(boxG(0.08, 2, 0.08), mat(0x6b4a2e), { pos: [0, 1, 0] }),
+  N(boxG(0.9, 0.2, 0.05), mat(0xe8c27a), { pos: [0.35, 1.75, 0.06], rot: [0, 0, 0.06] }),
+  N(boxG(0.9, 0.2, 0.05), mat(0xe8a27a), { pos: [-0.35, 1.45, 0.06], rot: [0, 0, -0.05] }),
+  N(boxG(0.9, 0.2, 0.05), mat(0xe8c27a), { pos: [0.3, 1.15, 0.06], rot: [0, 0, 0.03] }));
+scene.add(sign);
+const signLabels = [['פרו', [-1.85, 1.75, -1.2]], ['בוליביה', [-2.55, 1.45, -1.2]], ['פטגוניה', [-1.9, 1.15, -1.2]]];
+const plane = G({ layer: 'far' },
+  N(cylG(0.14, 0.1, 1.3, 6), mat(0xf2f4f8), { rot: [0, 0, Math.PI / 2] }),
+  N(boxG(0.3, 0.03, 1.5), mat(0xe25c4a)),
+  N(boxG(0.18, 0.35, 0.03), mat(0xe25c4a), { pos: [-0.58, 0.18, 0] }),
+  N(boxG(0.15, 0.03, 0.5), mat(0xe25c4a), { pos: [-0.58, 0.05, 0] }));
+plane.children.forEach(c => c.layer = 'far');
+scene.add(plane);
+
+// --- university props
+const stone = 0xd9d2c3;
+const campus = G({ pos: [GX(25.2), 0, -6.4] },
+  N(boxG(5.4, 2.6, 1.4), mat(stone), { pos: [0, 1.3, 0], layer: 'far' }),
+  N(boxG(5.8, 0.3, 1.6), mat(0xe8e2d4), { pos: [0, 2.75, 0], layer: 'far' }),
+  N(boxG(2.2, 0.8, 1.2), mat(0xc9c1b0), { pos: [0, 3.3, -0.1], layer: 'far' }),
+  N(sphereG(0.75, 10, 8, 4), mat(0x8fa7c9), { pos: [0, 3.7, -0.1], layer: 'far' }));
+for (let i = 0; i < 6; i++) campus.add(N(cylG(0.13, 0.15, 2.5, 6), mat(0xf4efe3), { pos: [-2.3 + i * 0.92, 1.25, 0.85], layer: 'far' }));
+for (let i = 0; i < 5; i++) campus.add(N(quadG(0.45, 0.7), mat(0xffe39a, { emis: 1 }), { pos: [-1.85 + i * 0.92, 1.3, 0.71], layer: 'far' }));
+scene.add(campus);
+const bookCols = [0xd64550, 0x2e86ab, 0xf2a541, 0x6a4c93, 0x3aa17e];
+const books = G({ pos: [GX(24.2), 0, -1.4], rot: [0, -0.3, 0] });
+bookCols.forEach((c, i) => books.add(N(boxG(1.1 - i * 0.06, 0.26, 0.8 - i * 0.04), mat(c), { pos: [0, 0.13 + i * 0.26, 0], rot: [0, (i % 2 ? 0.12 : -0.1), 0] })));
+books.add(N(boxG(0.6, 0.04, 0.6), mat(0x1c1c28), { pos: [0, 1.46, 0], rot: [0, 0.78, 0] }));
+books.add(N(cylG(0.18, 0.2, 0.14, 8), mat(0x1c1c28), { pos: [0, 1.38, 0] }));
+scene.add(books);
+[[GX(23.4), -2.6], [GX(26.6), -2.9]].forEach(([x, z]) => {
+  scene.add(N(cylG(0.08, 0.1, 0.9, 5), mat(0x6b4a2e), { pos: [x, 0.45, z] }));
+  scene.add(N(coneG(0.6, 1.6, 6), mat(0x3f8f5a), { pos: [x, 0.8, z] }));
+  scene.add(N(coneG(0.45, 1.1, 6), mat(0x4fa56a), { pos: [x, 1.6, z] }));
+});
+const lamp = G({ pos: [GX(26), 0, -1.6] },
+  N(cylG(0.04, 0.05, 2.2, 6), mat(0x2b2f3a), { pos: [0, 1.1, 0] }),
+  N(sphereG(0.16, 8, 6), mat(0xffe7a8, { emis: 1 }), { pos: [0, 2.26, 0], glow: 24 }));
+scene.add(lamp);
+
+// --- tech props
+const towerCol = [0x2a4a7a, 0x1f3a66, 0x335a8f];
+[[GX(28), 6.2, 1.6], [GX(29.1), 8.0, 1.9], [GX(30.2), 5.2, 1.5]].forEach(([x, h, w], i) => {
+  const tw = G({ pos: [x, 0, -7.2 - i * 0.4] }, N(boxG(w, h, 1.5), mat(towerCol[i]), { pos: [0, h / 2, 0], layer: 'far' }));
+  for (let r = 0; r < Math.floor(h / 0.7); r++) for (let c = 0; c < 3; c++) {
+    const lit = ((r * 7 + c * 3 + i) % 5) > 1;
+    tw.add(N(quadG(w / 4, 0.36), mat(lit ? 0x9fe3ff : 0x3d5d8c, { emis: lit ? 1 : 0 }), { pos: [(c - 1) * w / 3.2, 0.5 + r * 0.7, 0.76], layer: 'far' }));
+  }
+  scene.add(tw);
+});
+const screenMat = mat(0x14233d, { emis: 1 });
+function monitor(x, ry) {
+  const m = G({ pos: [x, 0.79, -0.15], rot: [0, ry, 0] },
+    N(boxG(0.06, 0.3, 0.06), mat(0x222733), { pos: [0, 0.15, 0] }),
+    N(boxG(0.82, 0.5, 0.04), mat(0x1a1d26), { pos: [0, 0.52, 0] }),
+    N(quadG(0.74, 0.42), screenMat, { pos: [0, 0.52, 0.022] }));
+  const lines = [[0x7ee0ff, 0.4], [0xffc94a, 0.25], [0x3ee28a, 0.5], [0xff8fa3, 0.3], [0x7ee0ff, 0.45]];
+  lines.forEach(([c, w], i) => m.add(N(quadG(w, 0.035), mat(c, { emis: 1 }), { pos: [-0.3 + w / 2 + (i % 2) * 0.06, 0.68 - i * 0.07, 0.026] })));
+  return m;
+}
+const desk = G({ pos: [GX(29.1), 0, -1.3] },
+  N(boxG(2.0, 0.07, 0.85), mat(0xe9e3d8), { pos: [0, 0.76, 0] }),
+  N(boxG(0.06, 0.74, 0.7), mat(0x2b2f3a), { pos: [-0.9, 0.37, 0] }),
+  N(boxG(0.06, 0.74, 0.7), mat(0x2b2f3a), { pos: [0.9, 0.37, 0] }),
+  monitor(-0.45, 0.15), monitor(0.45, -0.15),
+  N(cylG(0.2, 0.16, 0.3, 8), mat(0xe7e1d6), { pos: [1.35, 0.15, 0.2] }),
+  N(sphereG(0.32, 7, 5), mat(0x3f9f5f), { pos: [1.35, 0.55, 0.2] }),
+  N(sphereG(0.22, 7, 5), mat(0x52b673), { pos: [1.25, 0.82, 0.25] }));
+scene.add(desk);
+const chair = G({ pos: [GX(28.3), 0, -0.55], rot: [0, 0.5, 0] },
+  N(boxG(0.5, 0.08, 0.5), mat(0x3b3f8f), { pos: [0, 0.5, 0] }),
+  N(boxG(0.5, 0.6, 0.07), mat(0x3b3f8f), { pos: [0, 0.85, -0.22] }),
+  N(cylG(0.03, 0.03, 0.45, 5), mat(0x222733), { pos: [0, 0.25, 0] }),
+  N(cylG(0.25, 0.25, 0.03, 6), mat(0x222733), { pos: [0, 0.03, 0] }));
+scene.add(chair);
+
+/* ---------------- character ---------------- */
+const CM = {
+  skin: mat(0xc98d67), hair: mat(0x24170f), top: mat(olive), arm: mat(olive), pants: mat(olive),
+  shoe: mat(0x3b2b1e), eye: mat(0x1a1410), beret: mat(0x4a5230),
+};
+const char = G({ pos: [GX(18), 0, CHAR_Z] });
+const legs = [-1, 1].map(s => G({ pos: [s * 0.12, 0.92, 0] },
+  N(cylG(0.09, 0.075, 0.84, 6), CM.pants, { pos: [0, -0.42, 0] }),
+  N(boxG(0.15, 0.11, 0.3), CM.shoe, { pos: [0, -0.86, 0.05] })));
+const torso = N(cylG(0.25, 0.2, 0.64, 8), CM.top, { pos: [0, 1.27, 0], scl: [1, 1, 0.62] });
+const head = G({ pos: [0, 1.83, 0] },
+  N(sphereG(0.19, 10, 7), CM.skin),
+  N(sphereG(0.2, 10, 7, 3), CM.hair, { pos: [0, 0.04, -0.015], scl: [1, 0.95, 1.03] }),
+  N(boxG(0.035, 0.05, 0.02), CM.eye, { pos: [-0.065, 0.02, 0.18] }),
+  N(boxG(0.035, 0.05, 0.02), CM.eye, { pos: [0.065, 0.02, 0.18] }),
+  N(boxG(0.08, 0.018, 0.02), mat(0x8a4a3a), { pos: [0, -0.08, 0.178] }));
+const arms = [-1, 1].map(s => G({ pos: [s * 0.3, 1.54, 0] },
+  N(cylG(0.085, 0.078, 0.3, 6), CM.top, { pos: [0, -0.14, 0] }),
+  N(cylG(0.066, 0.058, 0.34, 6), CM.arm, { pos: [0, -0.43, 0] }),
+  N(sphereG(0.07, 6, 4), CM.skin, { pos: [0, -0.63, 0] })));
+char.add(...legs, torso, N(cylG(0.07, 0.07, 0.12, 6), CM.skin, { pos: [0, 1.64, 0] }), head, ...arms);
+
+// accessories per chapter
+const acc = {
+  army: G({},
+    N(sphereG(0.21, 10, 6), CM.beret, { pos: [0.03, 1.98, 0], rot: [0, 0, -0.25], scl: [1.05, 0.35, 1.05] }),
+    N(cylG(0.215, 0.215, 0.06, 8), mat(0x2b2418), { pos: [0, 1.02, 0], scl: [1, 1, 0.64] }),
+    N(boxG(0.12, 0.1, 0.03), mat(0x4a5530), { pos: [-0.11, 1.4, 0.15] }),
+    N(boxG(0.12, 0.1, 0.03), mat(0x4a5530), { pos: [0.11, 1.4, 0.15] })),
+  trip: G({},
+    N(boxG(0.5, 0.66, 0.32), mat(0x2f7d6d), { pos: [0, 1.36, -0.3] }),
+    N(boxG(0.4, 0.2, 0.08), mat(0x276a5c), { pos: [0, 1.18, -0.49] }),
+    N(cylG(0.11, 0.11, 0.56, 7), mat(0x8e3fa3), { pos: [0, 1.78, -0.3], rot: [0, 0, Math.PI / 2] }),
+    N(cylG(0.29, 0.29, 0.03, 10), mat(0xe8d8a8), { pos: [0, 1.99, 0] }),
+    N(cylG(0.17, 0.2, 0.13, 10), mat(0xe8d8a8), { pos: [0, 2.06, 0] }),
+    N(boxG(0.3, 0.05, 0.02), mat(0x111111), { pos: [0, 1.85, 0.19] })),
+  uni: G({},
+    N(sphereG(0.13, 8, 6, 3), CM.top, { pos: [0, 1.6, -0.12], rot: [0.4, 0, 0], scl: [1.3, 1, 1] }),
+    N(boxG(0.14, 0.07, 0.02), mat(0x1c1c28), { pos: [-0.07, 1.85, 0.195] }),
+    N(boxG(0.14, 0.07, 0.02), mat(0x1c1c28), { pos: [0.07, 1.85, 0.195] }),
+    N(boxG(0.36, 0.015, 0.02), mat(0x1c1c28), { pos: [0, 1.87, 0.2] })),
+  tech: G({},
+    N(boxG(0.17, 0.6, 0.02), mat(0x1f2a44), { pos: [-0.14, 1.27, 0.14], rot: [0, 0.25, 0] }),
+    N(boxG(0.17, 0.6, 0.02), mat(0x1f2a44), { pos: [0.14, 1.27, 0.14], rot: [0, -0.25, 0] }),
+    N(boxG(0.44, 0.6, 0.03), mat(0x1f2a44), { pos: [0, 1.27, -0.15] }),
+    N(boxG(0.06, 0.1, 0.02), mat(0xffc94a), { pos: [-0.12, 1.12, 0.16] })),
+};
+Object.values(acc).forEach(a => char.add(a));
+// held items live on the right hand
+const heldBooks = G({ pos: [0, -0.6, 0.12] },
+  N(boxG(0.3, 0.07, 0.22), mat(0xd64550), { pos: [0, 0, 0] }),
+  N(boxG(0.28, 0.07, 0.2), mat(0x2e86ab), { pos: [0, 0.07, 0], rot: [0, 0.2, 0] }),
+  N(boxG(0.26, 0.06, 0.2), mat(0xf2a541), { pos: [0, 0.135, 0], rot: [0, -0.1, 0] }));
+const heldCup = G({ pos: [0, -0.62, 0.1] },
+  N(cylG(0.055, 0.045, 0.14, 7), mat(0xf4f1ea), {}),
+  N(cylG(0.057, 0.057, 0.04, 7), mat(0x7b4a2a), { pos: [0, 0.03, 0] }));
+arms[1].add(heldBooks, heldCup);
+scene.add(char);
+
+const OUTFITS = {
+  army: { top: olive, arm: olive, pants: olive, shoe: 0x3b2b1e },
+  trip: { top: 0xf28c28, arm: 0xc98d67, pants: 0xa38f63, shoe: 0x5a4632 },
+  uni:  { top: 0x5b6fa8, arm: 0x5b6fa8, pants: 0x2e4a7a, shoe: 0xe9e9ef },
+  tech: { top: 0xf4f4f6, arm: 0x1f2a44, pants: 0xc9b48a, shoe: 0xf4f4f6 },
+};
+let outfitNow = null;
+function wear(id) {
+  if (outfitNow === id) return;
+  outfitNow = id;
+  const o = OUTFITS[id];
+  CM.top.c = hexRGB(o.top); CM.arm.c = hexRGB(o.arm); CM.pants.c = hexRGB(o.pants); CM.shoe.c = hexRGB(o.shoe);
+  for (const k in acc) acc[k].visible = k === id;
+  heldBooks.visible = id === 'uni'; heldCup.visible = id === 'tech';
+}
+
+/* ---------------- particles ---------------- */
+let seed = 7;
+const rnd = () => { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; };
+const coins = [], bursts = [];
+const dust = Array.from({ length: 70 }, () => [rnd() * 26 - 13, rnd() * 9, -9 + rnd() * 11, rnd()]);
+
+/* ---------------- graph ---------------- */
+const SAMPLES = 240;
+const nwPts = [], bkPts = [];
+for (let i = 0; i <= SAMPLES; i++) {
+  const a = 18 + 12 * i / SAMPLES;
+  nwPts.push([GX(a), GY(netWorth(a)), GZ]);
+  bkPts.push([GX(a), GY(bankBal(a)), GZ + 0.02]);
+}
+const fmtK = v => (v < -0.05 ? '−' : '') + '₪' + Math.abs(Math.round(v)) + 'K';
+const fmtFull = v => (v < -0.0005 ? '−' : '') + '₪' + Math.abs(Math.round(v * 1000)).toLocaleString('en-US');
+
+function tracePath(pts, n) {
+  ctx.beginPath();
+  for (let i = 0; i <= n; i++) { const p = project(pts[i]); i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]); }
+}
+function regionClip(v0, v1) {
+  const a = project([-9.6, GY(v0), GZ]), b = project([9.6, GY(v0), GZ]), c = project([9.6, GY(v1), GZ]), d = project([-9.6, GY(v1), GZ]);
+  ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.lineTo(c[0], c[1]); ctx.lineTo(d[0], d[1]); ctx.closePath(); ctx.clip();
+}
+function label(text, p, size, color, align = 'center', weight = 600) {
+  const q = project(p); if (q[2] < 0.3) return;
+  ctx.font = `${weight} ${Math.max(9, size * F / q[2])}px ${getComputedStyle(document.documentElement).getPropertyValue('--body')}`;
+  ctx.fillStyle = color; ctx.textAlign = align; ctx.textBaseline = 'middle';
+  ctx.direction = /[\u0590-\u05FF]/.test(text) ? 'rtl' : 'ltr';
+  ctx.fillText(text, q[0], q[1]);
+}
+function drawGraph(age) {
+  const frac = (age - 18) / 12, n = Math.max(1, Math.round(frac * SAMPLES));
+  // glass panel
+  const c = [project([-9.8, GY0 - 0.5, GZ - 0.05]), project([9.8, GY0 - 0.5, GZ - 0.05]), project([9.8, GY0 + GH + 0.4, GZ - 0.05]), project([-9.8, GY0 + GH + 0.4, GZ - 0.05])];
+  ctx.beginPath(); c.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])); ctx.closePath();
+  ctx.fillStyle = 'rgba(8,12,28,.42)'; ctx.fill();
+  ctx.strokeStyle = 'rgba(238,243,251,.18)'; ctx.lineWidth = 1; ctx.stroke();
+  // grid
+  ctx.lineWidth = 1;
+  for (const v of [-25, 0, 50, 100, 150]) {
+    const a = project([-9.4, GY(v), GZ]), b = project([9.4, GY(v), GZ]);
+    ctx.strokeStyle = v === 0 ? 'rgba(238,243,251,.55)' : 'rgba(238,243,251,.12)';
+    ctx.setLineDash(v === 0 ? [] : [4, 6]);
+    ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
+    label(fmtK(v), [-9.55, GY(v), GZ], 0.2, 'rgba(238,243,251,.6)', 'right');
+  }
+  ctx.setLineDash([]);
+  for (let a = 18; a <= 30; a++) {
+    const p = project([GX(a), GY0 - 0.15, GZ]), q = project([GX(a), GY0 - 0.02, GZ]);
+    ctx.strokeStyle = 'rgba(238,243,251,.35)'; ctx.beginPath(); ctx.moveTo(p[0], p[1]); ctx.lineTo(q[0], q[1]); ctx.stroke();
+    label(String(a), [GX(a), GY0 - 0.33, GZ], 0.22, a <= age + 0.01 ? 'rgba(238,243,251,.9)' : 'rgba(238,243,251,.35)', 'center', 800);
+  }
+  // area under net worth
+  const zero = project([0, GY(0), GZ]);
+  ctx.save();
+  tracePath(nwPts, n);
+  const last = project(nwPts[n]), first = project(nwPts[0]);
+  const z0 = project([nwPts[n][0], GY(0), GZ]), z1 = project([nwPts[0][0], GY(0), GZ]);
+  ctx.lineTo(z0[0], z0[1]); ctx.lineTo(z1[0], z1[1]); ctx.closePath();
+  ctx.save(); regionClip(0, VMAX); ctx.fillStyle = 'rgba(62,226,138,.16)'; ctx.fill(); ctx.restore();
+  ctx.save(); regionClip(VMIN, 0); ctx.fillStyle = 'rgba(255,93,115,.2)'; ctx.fill(); ctx.restore();
+  ctx.restore();
+  // bank line
+  ctx.lineJoin = ctx.lineCap = 'round';
+  tracePath(bkPts, n);
+  ctx.strokeStyle = '#52c7f2'; ctx.lineWidth = 0.05 * F / last[2];
+  ctx.shadowColor = '#52c7f2'; ctx.shadowBlur = 10 * DPR; ctx.stroke();
+  // net worth line, green above zero and red below
+  for (const [v0, v1, col] of [[0, VMAX + 50, '#3ee28a'], [VMIN - 50, 0, '#ff5d73']]) {
+    ctx.save(); regionClip(v0, v1);
+    tracePath(nwPts, n);
+    ctx.strokeStyle = col; ctx.shadowColor = col; ctx.shadowBlur = 16 * DPR; ctx.lineWidth = 0.1 * F / last[2]; ctx.stroke();
+    ctx.restore();
+  }
+  ctx.shadowBlur = 0;
+  // markers
+  const nw = netWorth(age), bk = bankBal(age);
+  const mp = project([GX(age), GY(nw), GZ]), bp = project([GX(age), GY(bk), GZ]);
+  const drop = project([GX(age), GY0 - 0.02, GZ]);
+  ctx.strokeStyle = 'rgba(255,201,74,.5)'; ctx.setLineDash([3, 4]); ctx.lineWidth = 1.2 * DPR;
+  ctx.beginPath(); ctx.moveTo(mp[0], mp[1]); ctx.lineTo(drop[0], drop[1]); ctx.stroke(); ctx.setLineDash([]);
+  const col = nw >= 0 ? '#3ee28a' : '#ff5d73';
+  const r = 0.16 * F / mp[2];
+  const glow = ctx.createRadialGradient(mp[0], mp[1], 0, mp[0], mp[1], r * 4);
+  glow.addColorStop(0, nw >= 0 ? 'rgba(62,226,138,.55)' : 'rgba(255,93,115,.55)'); glow.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = glow; ctx.beginPath(); ctx.arc(mp[0], mp[1], r * 4, 0, 7); ctx.fill();
+  ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(mp[0], mp[1], r, 0, 7); ctx.fill();
+  ctx.fillStyle = col; ctx.beginPath(); ctx.arc(mp[0], mp[1], r * 0.62, 0, 7); ctx.fill();
+  ctx.fillStyle = '#52c7f2'; ctx.beginPath(); ctx.arc(bp[0], bp[1], r * 0.55, 0, 7); ctx.fill();
+  label(fmtK(nw), [GX(age) + 0.1, GY(nw) + 0.42, GZ], 0.34, col, 'left', 800);
+}
+
+/* ---------------- HUD ---------------- */
+const $ = id => document.getElementById(id);
+const track = $('track');
+CHAPTERS.forEach((c, i) => {
+  const b = document.createElement('button');
+  b.className = 'seg'; b.style.flex = String(c.t1 - c.t0);
+  b.innerHTML = `<span>${c.name}</span><span class="yrs num">${c.yrs}</span><i class="fill"></i>`;
+  b.addEventListener('click', () => { seek(c.t0 + (i ? 0.01 : 0)); });
+  track.appendChild(b); c.el = b;
+});
+let subIdx = -1;
+function hud(t, age) {
+  const ci = chapterAt(t);
+  $('chapName').textContent = CHAPTERS[ci].name;
+  $('age').textContent = Math.floor(age + 1e-6);
+  const nw = netWorth(age), bk = bankBal(age);
+  $('nw').textContent = fmtFull(nw); $('nw').classList.toggle('neg', nw < 0);
+  $('bank').textContent = fmtFull(bk);
+  CHAPTERS.forEach((c, i) => {
+    c.el.classList.toggle('on', i === ci);
+    const f = Math.min(1, Math.max(0, (t - c.t0) / (c.t1 - c.t0)));
+    c.el.querySelector('.fill').style.transform = `scaleX(${f})`;
+  });
+  let e = 0; while (e + 1 < EVENTS.length && age >= EVENTS[e + 1][0]) e++;
+  if (e !== subIdx) {
+    subIdx = e; const s = $('sub'); s.textContent = EVENTS[e][1];
+    s.classList.remove('flash'); void s.offsetWidth; s.classList.add('flash');
+  }
+  $('titleCard').style.opacity = t < 2.2 ? 1 : Math.max(0, 1 - (t - 2.2) / 0.8);
+  $('endCard').style.opacity = Math.min(1, Math.max(0, (t - 33.8) / 1));
+  document.querySelector('.hud.top').style.opacity = 1 - +$('titleCard').style.opacity;
+}
+
+/* ---------------- frame ---------------- */
+const lerp = (a, b, k) => a + (b - a) * k;
+const mix3 = (a, b, k) => [0, 1, 2].map(i => lerp(a[i], b[i], k));
+let camX = GX(18);
+let prevNW = netWorth(18);
+
+function frame(t, dt) {
+  const age = ageAt(t), ci = chapterAt(t), ch = CHAPTERS[ci];
+  // chapter blend for sky: fade over 1.2s around each boundary
+  let sky = ch.sky, sun = ch.sun;
+  if (ci > 0 && t - ch.t0 < 1.2) {
+    const k = (t - ch.t0) / 1.2, p = CHAPTERS[ci - 1];
+    sky = [mix3(p.sky[0], ch.sky[0], k), mix3(p.sky[1], ch.sky[1], k)]; sun = mix3(p.sun, ch.sun, k);
+  }
+  tint = sun;
+
+  // character: walk along the age axis, spin into the next outfit at chapter changes
+  const x = GX(age), speed = Math.abs(ageAt(t + 0.05) - age) / 0.05 * 1.5;
+  char.pos[0] = x;
+  const walking = speed > 0.05;
+  const phase = t * (4 + speed * 5);
+  const swing = walking ? Math.min(0.7, 0.25 + speed * 0.5) : 0;
+  legs[0].rot[0] = Math.sin(phase) * swing; legs[1].rot[0] = -Math.sin(phase) * swing;
+  arms[0].rot[0] = -Math.sin(phase) * swing * 0.8;
+  const holding = outfitNow === 'uni' || outfitNow === 'tech';
+  arms[1].rot[0] = holding ? -0.9 : Math.sin(phase) * swing * 0.8;
+  arms[0].rot[2] = -0.08; arms[1].rot[2] = 0.08;
+  char.pos[1] = walking ? Math.abs(Math.sin(phase)) * 0.05 : Math.sin(t * 2) * 0.01;
+  let spin = 0;
+  const nextBoundary = CHAPTERS.find(c => c.t0 > 0 && Math.abs(t - c.t0) < 0.5);
+  if (nextBoundary) {
+    const k = (t - nextBoundary.t0 + 0.5); // 0..1
+    spin = (1 - Math.cos(k * Math.PI)) * Math.PI;
+    if (k > 0.45 && k < 0.45 + dt + 1e-3) burst(x);
+  }
+  wear(ch.id);
+  char.rot[1] = (walking ? 0.75 : 0.2) + spin;
+
+  // plane loops above the mountains
+  const pa = t * 0.5;
+  plane.pos = [-3.5 + Math.cos(pa) * 4.5, 6.4 + Math.sin(pa * 2) * 0.3, -8 + Math.sin(pa) * 1.5];
+  plane.rot = [0, -pa - Math.PI / 2 + Math.PI, Math.sin(pa) * 0.2];
+  flag.children[1].rot[1] = 0.25 + Math.sin(t * 2.2) * 0.12;
+
+  // money flow: coins up to the graph while net worth rises, red coins fall while it drops
+  const nw = netWorth(age), d = dt > 0 ? (nw - prevNW) / dt : 0; prevNW = nw;
+  const rate = Math.min(22, Math.abs(d) * 0.9);
+  if (dt > 0 && rnd() < rate * dt) {
+    if (d > 0) coins.push({ kind: 'up', p0: [x + (rnd() - 0.5) * 0.4, 2.1, CHAR_Z], p1: [GX(age), GY(nw), GZ], life: 0, dur: 1.1 + rnd() * 0.3 });
+    else coins.push({ kind: 'down', pos: [GX(age) + (rnd() - 0.5) * 0.3, GY(nw), GZ + 0.3], vel: [(rnd() - 0.5) * 1.5, 1 + rnd(), 1.2 + rnd() * 1.4], life: 0, dur: 1.6 });
+  }
+  for (const c of coins) {
+    c.life += dt;
+    if (c.kind === 'up') {
+      const k = Math.min(1, c.life / c.dur), e = 1 - Math.pow(1 - k, 2);
+      c.pos = [lerp(c.p0[0], c.p1[0], e), lerp(c.p0[1], c.p1[1], e) + Math.sin(k * Math.PI) * 1.4, lerp(c.p0[2], c.p1[2], e)];
+    } else {
+      c.vel[1] -= 7 * dt; c.pos = c.pos.map((v, i) => v + c.vel[i] * dt);
+      if (c.pos[1] < 0.06) { c.pos[1] = 0.06; c.vel[1] *= -0.3; c.vel[0] *= 0.6; c.vel[2] *= 0.6; }
+    }
+  }
+  for (let i = coins.length - 1; i >= 0; i--) if (coins[i].life > coins[i].dur) coins.splice(i, 1);
+  for (const b of bursts) { b.life += dt; b.vel[1] -= 3 * dt; b.pos = b.pos.map((v, i) => v + b.vel[i] * dt); }
+  for (let i = bursts.length - 1; i >= 0; i--) if (bursts[i].life > 1.2) bursts.splice(i, 1);
+
+  // camera follows the character; on narrow screens it follows more tightly
+  const aspect = W / H;
+  const follow = 1 - 0.55 * Math.min(1, Math.max(0, (aspect - 0.7) / 1));
+  const dist = aspect < 1 ? 12.5 : 10.5;
+  camX = lerp(camX, x * follow, Math.min(1, dt * 2.5 || 1));
+  const sway = REDUCED ? 0 : Math.sin(t * 0.35) * 1.2;
+  cam.eye = [camX + sway, 3.1 + (REDUCED ? 0 : Math.sin(t * 0.5) * 0.2), dist];
+  cam.tgt = [camX * 0.96, aspect < 1 ? 3.6 : 3.3, -2];
+  camUpdate();
+
+  // ---- draw
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  const sg = ctx.createLinearGradient(0, 0, 0, H);
+  sg.addColorStop(0, `rgb(${sky[0].map(v => v | 0)})`); sg.addColorStop(1, `rgb(${sky[1].map(v => v | 0)})`);
+  ctx.fillStyle = sg; ctx.fillRect(0, 0, W, H);
+  // sun
+  const sp = project([camX - 4, 8.5, -30]);
+  const sgl = ctx.createRadialGradient(sp[0], sp[1], 0, sp[0], sp[1], H * 0.35);
+  sgl.addColorStop(0, `rgba(${sun.map(v => v | 0)},.55)`); sgl.addColorStop(1, `rgba(${sun.map(v => v | 0)},0)`);
+  ctx.fillStyle = sgl; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = `rgba(${sun.map(v => v | 0)},.9)`; ctx.beginPath(); ctx.arc(sp[0], sp[1], H * 0.045, 0, 7); ctx.fill();
+  // drifting dust
+  for (const p of dust) {
+    const q = project([p[0], (p[1] + t * 0.15 * (0.5 + p[3])) % 9, p[2]]);
+    if (q[2] < 0.5) continue;
+    ctx.fillStyle = `rgba(255,255,255,${0.12 + p[3] * 0.25})`;
+    ctx.fillRect(q[0], q[1], 2 * DPR * (0.5 + p[3]), 2 * DPR * (0.5 + p[3]));
+  }
+
+  polys.ground.length = polys.far.length = polys.near.length = 0;
+  collect(scene, I_AFF);
+  const byDepth = (a, b) => b.z - a.z;
+  polys.ground.sort(byDepth).forEach(drawPoly);
+  // soft shadow under the character
+  const sh = [];
+  for (let i = 0; i < 12; i++) { const a = i / 12 * Math.PI * 2; sh.push(project([x + Math.cos(a) * 0.42, 0.02, CHAR_Z + Math.sin(a) * 0.26])); }
+  ctx.beginPath(); sh.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])); ctx.closePath();
+  ctx.fillStyle = 'rgba(0,0,0,.28)'; ctx.fill();
+  polys.far.sort(byDepth).forEach(drawPoly);
+  ctx.save(); drawGraph(age); ctx.restore();
+  // near geometry + coins + bursts, all depth-sorted together
+  const items = polys.near.map(p => ({ z: p.z, draw: () => drawPoly(p) }));
+  for (const c of coins) {
+    const q = project(c.pos); if (q[2] < 0.3) continue;
+    const r = 0.13 * F / q[2], fade = c.kind === 'down' ? Math.max(0, 1 - c.life / c.dur) : 1;
+    items.push({ z: q[2], draw: () => {
+      ctx.globalAlpha = fade;
+      const sq = Math.abs(Math.cos(c.life * 9));
+      ctx.fillStyle = c.kind === 'up' ? '#ffc94a' : '#ff5d73';
+      ctx.beginPath(); ctx.ellipse(q[0], q[1], r * (0.25 + 0.75 * sq), r, 0, 0, 7); ctx.fill();
+      ctx.strokeStyle = c.kind === 'up' ? '#b8841c' : '#a8283a'; ctx.lineWidth = r * 0.18; ctx.stroke();
+      if (sq > 0.5) { ctx.fillStyle = c.kind === 'up' ? '#8a5f0c' : '#fff'; ctx.font = `800 ${r * 1.2}px sans-serif`; ctx.direction = 'ltr'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('₪', q[0], q[1] + r * 0.05); }
+      ctx.globalAlpha = 1;
+    } });
+  }
+  for (const b of bursts) {
+    const q = project(b.pos); if (q[2] < 0.3) continue;
+    const s = 0.07 * F / q[2] * (1 - b.life / 1.2);
+    items.push({ z: q[2], draw: () => { ctx.fillStyle = b.col; ctx.fillRect(q[0] - s / 2, q[1] - s / 2, s, s); } });
+  }
+  items.sort(byDepth).forEach(i => i.draw());
+  // world-anchored labels
+  if (ci === 1 || (ci === 0 && t > 7) || (ci === 2 && t < 18)) signLabels.forEach(([s, p]) => label(s, p, 0.13, '#3a2412', 'center', 800));
+
+  hud(t, age);
+}
+function burst(x) {
+  const cols = ['#ffc94a', '#3ee28a', '#52c7f2', '#ff8fa3', '#ffffff'];
+  for (let i = 0; i < 40; i++) {
+    const a = rnd() * Math.PI * 2, s = 1 + rnd() * 2.5;
+    bursts.push({ pos: [x, 1.2 + rnd() * 0.6, CHAR_Z], vel: [Math.cos(a) * s, 1 + rnd() * 3, Math.sin(a) * s * 0.5], col: cols[i % cols.length], life: rnd() * 0.3 });
+  }
+}
+
+/* ---------------- loop ---------------- */
+function resize() {
+  DPR = Math.min(2, window.devicePixelRatio || 1);
+  W = canvas.clientWidth * DPR; H = canvas.clientHeight * DPR;
+  canvas.width = W; canvas.height = H;
+  F = (H / 2) / Math.tan(FOV / 2);
+}
+addEventListener('resize', resize); resize();
+
+let t = 0, playing = true, last = performance.now();
+function seek(nt) { t = nt; coins.length = 0; bursts.length = 0; prevNW = netWorth(ageAt(t)); camX = GX(ageAt(t)) * 0.5; subIdx = -1; }
+function setPlaying(p) {
+  playing = p; $('icoPause').hidden = !p; $('icoPlay').hidden = p;
+  $('play').setAttribute('aria-label', p ? 'השהה' : 'נגן');
+}
+$('play').addEventListener('click', () => setPlaying(!playing));
+$('restart').addEventListener('click', () => { seek(0); setPlaying(true); });
+addEventListener('keydown', e => { if (e.code === 'Space' && e.target === document.body) { e.preventDefault(); setPlaying(!playing); } });
+
+function tick(now) {
+  let dt = Math.min(0.05, (now - last) / 1000); last = now;
+  if (!playing) dt = 0;
+  t += dt;
+  if (t > T_END) { if (REC) { window.__done = true; t = T_END; } else seek(0); }
+  frame(t, dt);
+  requestAnimationFrame(tick);
+}
+seek(0);
+requestAnimationFrame(tick);
+window.__seek = seek;
+})();
+</script>
