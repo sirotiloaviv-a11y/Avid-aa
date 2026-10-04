@@ -91,7 +91,7 @@ export function FindingsView() {
               )}
               {result.findings.map((f) => {
                 const isOpen = expanded === f.id;
-                const working = f.status === 'remediating' || busy[`remediate:${f.id}`];
+                const working = f.status === 'remediating' || busy[`remediate:${f.id}`] || busy[`autofix:${f.id}`];
                 return (
                   <Fragment key={f.id}>
                     <tr className={`cursor-pointer transition hover:bg-white/[0.02] ${!f.monitored ? 'opacity-50' : ''}`} onClick={() => setExpanded(isOpen ? null : f.id)}>
@@ -117,10 +117,11 @@ export function FindingsView() {
                             type="button"
                             className="btn-secondary px-2.5 py-1 text-xs"
                             disabled={working}
-                            onClick={(e) => { e.stopPropagation(); actions.remediate(f); }}
+                            onClick={(e) => { e.stopPropagation(); if (f.autoFix?.supported) actions.autoFix(f); else actions.remediate(f); }}
+                            title={f.autoFix?.supported ? `Auto-Fix with ${f.autoFix.permission}` : f.autoFix?.reason}
                           >
-                            {working ? <Spinner className="h-3.5 w-3.5" /> : <Icon name="bolt" className="h-3.5 w-3.5" />}
-                            {working ? 'Running' : 'Remediate'}
+                            {working ? <Spinner className="h-3.5 w-3.5" /> : <Icon name={f.autoFix?.supported ? 'bolt' : 'check'} className="h-3.5 w-3.5" />}
+                            {working ? 'Running' : f.autoFix?.supported ? 'Auto-Fix' : 'Resolve'}
                           </button>
                         )}
                       </td>

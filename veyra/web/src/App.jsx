@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useVeyra } from './lib/VeyraContext.jsx';
-import { timeAgo } from './lib/format.js';
+import { scoreColor, timeAgo } from './lib/format.js';
 import { Icon, Spinner } from './components/Icon.jsx';
 import { Skeleton } from './components/primitives.jsx';
+import { ScoreChangeChip, useAnimatedNumber, useScoreChange } from './components/ScoreGauge.jsx';
 import { Overview } from './views/Overview.jsx';
 import { RecommendationsView } from './views/RecommendationsView.jsx';
 import { FindingsView } from './views/FindingsView.jsx';
@@ -90,6 +91,27 @@ function Sidebar({ route, navigate }) {
   );
 }
 
+/** Live score in the header, so Auto-Fix results are visible from every page. */
+function ScorePill({ risk, onClick }) {
+  const animated = useAnimatedNumber(risk.score);
+  const change = useScoreChange(risk.score);
+  const color = scoreColor(animated);
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`relative inline-flex items-center gap-2 rounded-lg border px-2.5 py-1.5 transition hover:bg-white/[0.04] ${change?.delta > 0 ? 'animate-glow-pulse' : ''}`}
+      style={{ borderColor: `${color}55` }}
+      aria-label={`Security score ${risk.score}, grade ${risk.grade}`}
+      title="Overall security score"
+    >
+      <span className="tabular font-mono text-base font-semibold leading-none" style={{ color }}>{animated}</span>
+      <span className="text-[11px] font-semibold text-slate-400">{risk.grade}</span>
+      <ScoreChangeChip change={change} className="absolute -top-3 left-1/2 -translate-x-1/2" />
+    </button>
+  );
+}
+
 function Header({ route, navigate }) {
   const { data, actions, busy } = useVeyra();
   const meta = ROUTES[route];
@@ -110,7 +132,8 @@ function Header({ route, navigate }) {
           <h1 className="text-xl font-semibold tracking-tight text-white">{meta.title}</h1>
           <p className="mt-0.5 text-sm text-slate-500">{meta.subtitle}</p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+          {data && <ScorePill risk={data.risk} onClick={() => navigate('overview')} />}
           {lastScan && (
             <span className="hidden items-center gap-1.5 text-xs text-slate-500 md:inline-flex">
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" /> Last scan {timeAgo(lastScan)}
@@ -118,6 +141,18 @@ function Header({ route, navigate }) {
           )}
           <button type="button" onClick={actions.syncAll} disabled={busy.syncAll || !data} className="btn-secondary">
             {busy.syncAll ? <Spinner /> : <Icon name="refresh" />} {busy.syncAll ? 'Scanning…' : 'Rescan all'}
+          </button>
+          <button
+            type="button"
+            onClick={actions.downloadReport}
+            disabled={busy.report || !data}
+            className="btn-primary"
+            aria-label="Download Executive Report (PDF)"
+            title="Executive summary, platform breakdown, top 5 CISO actions and SOC 2 / ISO 27001 readiness"
+          >
+            {busy.report ? <Spinner /> : <Icon name="download" />}
+            <span className="hidden xl:inline">{busy.report ? 'Generating…' : 'Download Executive Report (PDF)'}</span>
+            <span className="xl:hidden">{busy.report ? 'Generating…' : 'Report (PDF)'}</span>
           </button>
         </div>
       </div>

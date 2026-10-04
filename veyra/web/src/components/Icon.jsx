@@ -26,6 +26,9 @@ const PATHS = {
   layers: <><path d="M12 3l9 5-9 5-9-5 9-5z" /><path d="M3 13l9 5 9-5" /></>,
   menu: <path d="M4 7h16M4 12h16M4 17h16" />,
   rotate: <><path d="M4 12a8 8 0 108-8 8.5 8.5 0 00-6 2.5L4 8.5" /><path d="M4 4v4.5h4.5" /></>,
+  copy: <><rect x="8.5" y="8.5" width="11.5" height="11.5" rx="2" /><path d="M15.5 8.5V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7.5a2 2 0 002 2h2.5" /></>,
+  download: <><path d="M12 4v11" /><path d="M7.5 10.5L12 15l4.5-4.5" /><path d="M5 19.5h14" /></>,
+  file: <><path d="M14 3.5H7a2 2 0 00-2 2v13a2 2 0 002 2h10a2 2 0 002-2V8.5l-5-5z" /><path d="M14 3.5v5h5" /><path d="M9 13h6M9 16.5h4" /></>,
 };
 
 export function Icon({ name, className = 'h-4 w-4', strokeWidth = 1.8, ...rest }) {

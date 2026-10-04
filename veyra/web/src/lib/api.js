@@ -38,4 +38,21 @@ export const api = {
   sync: (id) => request('POST', `/integrations/${enc(id)}/sync`),
   syncAll: () => request('POST', '/sync'),
   reset: () => request('POST', '/demo/reset'),
+  insight: (id, { refresh = false } = {}) => request('GET', `/findings/${enc(id)}/insight${refresh ? '?refresh=1' : ''}`),
+  aiStatus: () => request('GET', '/ai/status'),
+  startAutoFix: (findingId) => request('POST', '/remediate/auto-fix', { findingId }),
+  autoFixJob: (jobId) => request('GET', `/remediate/jobs/${enc(jobId)}`),
+  /** Downloads the executive PDF and returns { blob, filename }. */
+  async executiveReport() {
+    let response;
+    try {
+      response = await fetch('/api/reports/pdf');
+    } catch {
+      throw new ApiError(0, { error: 'Cannot reach the Veyra API. Is the server running on port 4000?' });
+    }
+    if (!response.ok) throw new ApiError(response.status, await response.json().catch(() => null));
+    const disposition = response.headers.get('content-disposition') ?? '';
+    const filename = disposition.match(/filename="([^"]+)"/)?.[1] ?? 'veyra-executive-report.pdf';
+    return { blob: await response.blob(), filename };
+  },
 };

@@ -156,6 +156,41 @@ function IntegrationStatusCards({ integrations, risk, onManage }) {
   );
 }
 
+function ComplianceCard({ frameworks }) {
+  if (!frameworks?.length) return null;
+  return (
+    <section className="card">
+      <div className="card-header">
+        <div>
+          <h2 className="text-sm font-semibold text-slate-100">Compliance readiness</h2>
+          <p className="text-xs text-slate-500">Controls assessed on monitored platforms</p>
+        </div>
+        <Icon name="shieldCheck" className="h-4 w-4 text-slate-500" />
+      </div>
+      <div className="space-y-4 p-5">
+        {frameworks.map((fw) => {
+          const color = fw.readiness == null ? '#475569' : scoreColor(fw.readiness);
+          return (
+            <div key={fw.id}>
+              <div className="flex items-baseline justify-between">
+                <span className="text-sm font-medium text-slate-200">{fw.name}</span>
+                <span className="tabular font-mono text-lg font-semibold" style={{ color }}>{fw.readiness == null ? 'n/a' : `${fw.readiness}%`}</span>
+              </div>
+              <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-white/[0.06]">
+                <div className="h-full rounded-full transition-all duration-700" style={{ width: `${fw.readiness ?? 0}%`, background: color }} />
+              </div>
+              <p className="mt-1.5 text-[11px] text-slate-500">
+                {fw.passing} passing · {fw.partial} partial · {fw.failing} failing of {fw.assessed} controls
+                {fw.topGaps?.[0] && <> · top gap <span className="font-mono text-slate-400">{fw.topGaps[0].id}</span></>}
+              </p>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 export function Overview({ navigate }) {
   const { data } = useVeyra();
   const { risk, integrations, recommendations, activity } = data;
@@ -170,8 +205,9 @@ export function Overview({ navigate }) {
         <div className="xl:col-span-8">
           <RecommendationsFeed recommendations={recommendations} integrations={integrations} limit={5} onViewAll={() => navigate('recommendations')} />
         </div>
-        <div className="xl:col-span-4">
+        <div className="space-y-6 xl:col-span-4">
           <IntegrationStatusCards integrations={integrations} risk={risk} onManage={() => navigate('integrations')} />
+          <ComplianceCard frameworks={data.compliance} />
         </div>
       </div>
     </div>

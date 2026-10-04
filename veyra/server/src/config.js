@@ -14,6 +14,9 @@ export const config = {
   host: process.env.HOST ?? '127.0.0.1',
   connectorLatencyMs: int(process.env.VEYRA_CONNECTOR_LATENCY_MS, 900),
   remediationDelayMs: int(process.env.VEYRA_REMEDIATION_DELAY_MS, 2500),
+  autoFixStepMs: int(process.env.VEYRA_AUTOFIX_STEP_MS, 700),
+  aiTimeoutMs: int(process.env.VEYRA_AI_TIMEOUT_MS, 45000),
+  tenantName: process.env.VEYRA_TENANT_NAME ?? 'Acme Corp',
   staticDir: path.resolve(here, '../../web/dist'),
 };
 

@@ -2,6 +2,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import express from 'express';
 import { HttpError } from './lib/errors.js';
+import { createAIService } from './services/aiService.js';
+import { AutoFixEngine } from './services/autoFix.js';
+import { renderExecutiveReport, reportFilename } from './services/reportPdf.js';
 
 const asyncRoute = (handler) => (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next);
 
@@ -15,7 +18,12 @@ function securityHeaders(_req, res, next) {
   next();
 }
 
-export function createApp(brain, { staticDir, logger = console } = {}) {
+export function createApp(brain, {
+  staticDir,
+  logger = console,
+  ai = createAIService({ logger }),
+  autoFix = new AutoFixEngine({ brain, logger }),
+} = {}) {
   const app = express();
   app.disable('x-powered-by');
   app.use(securityHeaders);
@@ -69,7 +77,39 @@ export function createApp(brain, { staticDir, logger = console } = {}) {
 
   api.post('/findings/:id/remediate', (req, res) => res.status(202).json(brain.remediate(req.params.id)));
 
+  // AI insight: executive summary, business impact, remediation code, side effects.
+  api.get('/findings/:id/insight', asyncRoute(async (req, res) => {
+    const context = brain.findingContext(req.params.id);
+    res.json(await ai.insight(context, { refresh: req.query.refresh === '1' || req.query.refresh === 'true' }));
+  }));
+
+  api.get('/ai/status', asyncRoute(async (_req, res) => res.json(await ai.status())));
+
+  // Auto-Fix: start a job, then poll it for step-by-step progress.
+  api.post('/remediate/auto-fix', (req, res) => {
+    const job = autoFix.start(req.body?.findingId);
+    res.status(202).location(`${req.baseUrl}/remediate/jobs/${job.id}`).json(job);
+  });
+
+  api.get('/remediate/jobs/:jobId', (req, res) => res.json(autoFix.get(req.params.jobId)));
+
+  api.get('/compliance', (_req, res) => res.json({ frameworks: brain.compliance() }));
+
+  api.get('/reports/executive', (_req, res) => res.json(brain.executiveReport()));
+
+  api.get('/reports/pdf', (_req, res) => {
+    const report = brain.executiveReport();
+    const pdf = renderExecutiveReport(report);
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="${reportFilename(report)}"`,
+      'Content-Length': String(pdf.length),
+    });
+    res.send(pdf);
+  });
+
   api.post('/demo/reset', asyncRoute(async (_req, res) => {
+    autoFix.reset();
     await brain.reset();
     res.json(brain.dashboard());
   }));

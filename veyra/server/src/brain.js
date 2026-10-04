@@ -1,7 +1,10 @@
 import { createRng } from './lib/rng.js';
 import { badRequest, conflict, HttpError, notFound } from './lib/errors.js';
-import { computeRiskScore, countBySeverity, SEVERITIES } from './engine/risk.js';
+import { computeRiskScore, countBySeverity, findingPenalty, projectedGain, scoreFromPenalty, SEVERITIES } from './engine/risk.js';
 import { buildRecommendations } from './engine/prioritize.js';
+import { computeCompliance } from './engine/compliance.js';
+import { getPlaybook } from './remediation/playbooks.js';
+import { BASELINE_CHECKS } from './connectors/baselineChecks.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const HISTORY_LIMIT = 500;
@@ -13,8 +16,9 @@ const FINDING_STATUSES = ['open', 'remediating', 'resolved'];
  * POST /api/demo/reset returns the prototype to its seeded demo state.
  */
 export class SecurityBrain {
-  constructor({ connectors, demoConnections = {}, remediationDelayMs = 2500, now = () => Date.now() }) {
+  constructor({ connectors, demoConnections = {}, remediationDelayMs = 2500, now = () => Date.now(), tenantName = 'Acme Corp' }) {
     this.connectors = connectors;
+    this.tenantName = tenantName;
     this.demoConnections = demoConnections;
     this.remediationDelayMs = remediationDelayMs;
     this.now = now;
@@ -211,7 +215,8 @@ export class SecurityBrain {
       if (!existing) {
         this.findings.set(finding.id, { ...finding, lastSeenAt: nowIso });
       } else if (existing.status !== 'resolved') {
-        this.findings.set(finding.id, { ...finding, status: existing.status, remediationStartedAt: existing.remediationStartedAt, lastSeenAt: nowIso });
+        const { status, remediationStartedAt, autoFixJobId } = existing;
+        this.findings.set(finding.id, { ...finding, status, remediationStartedAt, autoFixJobId, lastSeenAt: nowIso });
       }
     }
     for (const finding of this.findings.values()) {
@@ -233,10 +238,16 @@ export class SecurityBrain {
     return [...this.findings.values()].filter((f) => f.status !== 'resolved' && this.#isMonitored(this.integrations.get(f.provider)));
   }
 
+  #playbookFor(finding) {
+    return getPlaybook(finding, this.integrations.get(finding.provider)?.account);
+  }
+
   #findingView(finding) {
     const connector = this.connectors.get(finding.provider);
+    const { autoFixJobId, ...rest } = finding;
     return {
-      ...finding,
+      ...rest,
+      autoFix: this.#playbookFor(finding).autoFix,
       monitored: this.#isMonitored(this.integrations.get(finding.provider)),
       integration: { id: connector.id, name: connector.name, shortName: connector.definition.shortName, color: connector.definition.color },
     };
@@ -268,7 +279,7 @@ export class SecurityBrain {
    * is simulated: the finding moves to "remediating" and resolves after
    * `remediationDelayMs`, at which point the score is recomputed.
    */
-  remediate(id) {
+  #remediable(id) {
     const finding = this.findings.get(id);
     if (!finding) throw notFound('Finding');
     if (!this.#isMonitored(this.integrations.get(finding.provider))) {
@@ -276,6 +287,11 @@ export class SecurityBrain {
     }
     if (finding.status === 'remediating') throw conflict('Remediation is already in progress');
     if (finding.status === 'resolved') throw conflict('Finding is already resolved');
+    return finding;
+  }
+
+  remediate(id) {
+    const finding = this.#remediable(id);
 
     finding.status = 'remediating';
     finding.remediationStartedAt = new Date(this.now()).toISOString();
@@ -291,6 +307,70 @@ export class SecurityBrain {
     this.timers.add(timer);
 
     return this.#findingView(finding);
+  }
+
+  // ------------------------------------------------------------ auto-fix hooks
+  //
+  // The AutoFixEngine drives the workflow; these methods are the only way it
+  // touches state. A claim is identified by the job id, so a job that outlives
+  // a reset, disconnect or manual change can never resolve the wrong finding.
+
+  claimAutoFix(id, jobId) {
+    const finding = this.#remediable(id);
+    const playbook = this.#playbookFor(finding);
+    if (!playbook.autoFix.supported) {
+      throw new HttpError(422, `Auto-Fix is not available for this finding: ${playbook.autoFix.reason}`);
+    }
+    Object.assign(finding, { status: 'remediating', remediationStartedAt: new Date(this.now()).toISOString(), autoFixJobId: jobId });
+    return this.#autoFixContext(finding, playbook);
+  }
+
+  /** Re-validates a claim mid-flight; returns a reason string when it is no longer valid. */
+  autoFixBlocker(id, jobId) {
+    const finding = this.findings.get(id);
+    if (!finding || finding.autoFixJobId !== jobId || finding.status !== 'remediating') {
+      return 'The finding changed while the fix was running (rescan, reset or manual action).';
+    }
+    const state = this.integrations.get(finding.provider);
+    if (!state.connected) return `${this.connectors.get(finding.provider).name} was disconnected.`;
+    if (!state.enabled) return `Monitoring for ${this.connectors.get(finding.provider).name} was paused.`;
+    return null;
+  }
+
+  completeAutoFix(id, jobId) {
+    if (this.autoFixBlocker(id, jobId)) return false;
+    const finding = this.findings.get(id);
+    Object.assign(finding, { status: 'resolved', resolvedAt: new Date(this.now()).toISOString(), resolution: 'auto-fixed', autoFixJobId: undefined });
+    this.#recordScore();
+    return true;
+  }
+
+  releaseAutoFix(id, jobId) {
+    const finding = this.findings.get(id);
+    if (finding?.autoFixJobId === jobId && finding.status === 'remediating') {
+      Object.assign(finding, { status: 'open', remediationStartedAt: undefined, autoFixJobId: undefined });
+    }
+  }
+
+  #autoFixContext(finding, playbook = this.#playbookFor(finding)) {
+    const connector = this.connectors.get(finding.provider);
+    const open = this.#openFindings();
+    const isOpen = open.some((f) => f.id === finding.id);
+    return {
+      finding: this.#findingView(finding),
+      account: this.integrations.get(finding.provider)?.account ?? null,
+      integration: { id: connector.id, name: connector.name, vendor: connector.definition.vendor },
+      playbook,
+      score: this.#currentRisk().score,
+      projectedGain: isOpen ? projectedGain(finding, open) : 0,
+    };
+  }
+
+  /** Everything the AI service needs to reason about one finding. */
+  findingContext(id) {
+    const finding = this.findings.get(id);
+    if (!finding) throw notFound('Finding');
+    return this.#autoFixContext(finding);
   }
 
   /** Resolves once every in-flight remediation has finished (used by tests). */
@@ -347,7 +427,49 @@ export class SecurityBrain {
 
   recommendations({ limit } = {}) {
     const integrationsById = new Map([...this.connectors.values()].map((c) => [c.id, { id: c.id, ...c.definition }]));
-    return buildRecommendations(this.#openFindings(), integrationsById, { limit, now: this.now() });
+    return buildRecommendations(this.#openFindings(), integrationsById, { limit, now: this.now() })
+      .map((rec) => ({ ...rec, autoFix: this.#playbookFor(this.findings.get(rec.findingId)).autoFix }));
+  }
+
+  compliance() {
+    const assessedChecks = [...this.integrations.values()]
+      .filter((s) => this.#isMonitored(s))
+      .flatMap((s) => [...this.connectors.get(s.id).templates, ...(BASELINE_CHECKS[s.id] ?? [])]
+        .map((check) => ({ provider: s.id, key: check.key, category: check.category, frameworks: check.frameworks })));
+    return computeCompliance(assessedChecks, this.#openFindings());
+  }
+
+  /** Data model behind the executive PDF report. */
+  executiveReport({ topN = 5 } = {}) {
+    const risk = this.riskScore();
+    const open = this.#openFindings();
+    const top = this.recommendations({ limit: topN });
+    const topIds = new Set(top.map((r) => r.findingId));
+    const remainingPenalty = open.filter((f) => !topIds.has(f.id)).reduce((sum, f) => sum + findingPenalty(f), 0);
+    const scores = new Map(risk.byIntegration.map((i) => [i.id, i]));
+
+    return {
+      generatedAt: new Date(this.now()).toISOString(),
+      tenant: this.tenantName,
+      risk,
+      projectedScore: scoreFromPenalty(remainingPenalty),
+      integrations: this.listIntegrations().map((i) => ({
+        id: i.id,
+        name: i.name,
+        shortName: i.shortName,
+        color: i.color,
+        status: i.status,
+        monitored: i.monitored,
+        account: i.account?.label ?? null,
+        score: scores.get(i.id)?.score ?? null,
+        grade: scores.get(i.id)?.grade ?? null,
+        counts: i.findings.counts,
+        open: i.findings.open,
+        lastSyncAt: i.lastSyncAt,
+      })),
+      topActions: top,
+      compliance: this.compliance(),
+    };
   }
 
   dashboard() {
@@ -357,6 +479,7 @@ export class SecurityBrain {
       risk: this.riskScore(),
       integrations: this.listIntegrations(),
       recommendations: this.recommendations(),
+      compliance: this.compliance().map(({ controls, ...summary }) => summary),
       activity: {
         remediating: all.filter((f) => f.status === 'remediating').length,
         resolved: all.filter((f) => f.status === 'resolved').length,

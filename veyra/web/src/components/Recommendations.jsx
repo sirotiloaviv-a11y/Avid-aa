@@ -3,13 +3,16 @@ import { useVeyra } from '../lib/VeyraContext.jsx';
 import { SEVERITIES, SEVERITY_STYLE, timeAgo } from '../lib/format.js';
 import { Icon, Spinner } from './Icon.jsx';
 import { EmptyState, ProviderMark, SeverityBadge } from './primitives.jsx';
+import { InsightPanel } from './InsightPanel.jsx';
 
 const EXPOSURE_LABEL = { public: 'Internet-exposed', external: 'External access', internal: 'Internal' };
 
 export function RecommendationCard({ rec, index }) {
   const { actions, busy } = useVeyra();
   const [open, setOpen] = useState(false);
-  const remediating = rec.status === 'remediating' || busy[`remediate:${rec.findingId}`];
+  const fixing = Boolean(busy[`autofix:${rec.findingId}`]);
+  const remediating = rec.status === 'remediating' || fixing || busy[`remediate:${rec.findingId}`];
+  const canAutoFix = rec.autoFix?.supported;
   const style = SEVERITY_STYLE[rec.severity];
 
   return (
@@ -42,46 +45,20 @@ export function RecommendationCard({ rec, index }) {
           <h3 className="mt-2 text-[15px] font-semibold leading-snug text-slate-100">{rec.title}</h3>
           <p className={`mt-1.5 text-sm leading-relaxed text-slate-400 ${open ? '' : 'line-clamp-2'}`}>{rec.explanation}</p>
 
-          {open && (
-            <div className="mt-4 grid gap-4 rounded-lg border border-white/[0.06] bg-ink-950/50 p-4 md:grid-cols-2">
-              <div>
-                <p className="eyebrow">Business impact</p>
-                <p className="mt-1.5 text-sm text-slate-300">{rec.impact}</p>
-                <p className="eyebrow mt-4">Affected resource</p>
-                <p className="mt-1.5 break-all font-mono text-xs text-slate-300">{rec.resource.name}</p>
-                <p className="text-xs text-slate-500">{rec.resource.type}</p>
-                {rec.frameworks?.length > 0 && (
-                  <>
-                    <p className="eyebrow mt-4">Compliance</p>
-                    <div className="mt-1.5 flex flex-wrap gap-1.5">
-                      {rec.frameworks.map((f) => (
-                        <span key={f} className="rounded border border-white/10 px-1.5 py-0.5 text-[11px] text-slate-400">{f}</span>
-                      ))}
-                    </div>
-                  </>
-                )}
-              </div>
-              <div>
-                <p className="eyebrow">Remediation playbook</p>
-                <ol className="mt-2 space-y-2">
-                  {rec.remediation.map((step, i) => (
-                    <li key={step} className="flex gap-2.5 text-sm text-slate-300">
-                      <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-white/[0.06] font-mono text-[10px] text-slate-400">{i + 1}</span>
-                      {step}
-                    </li>
-                  ))}
-                </ol>
-              </div>
-            </div>
-          )}
+          {open && <InsightPanel findingId={rec.findingId} rec={rec} />}
 
           <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
             <button type="button" onClick={() => setOpen((o) => !o)} className="inline-flex items-center gap-1 font-medium text-slate-400 hover:text-brand-300" aria-expanded={open}>
               <Icon name="chevronDown" className={`h-3.5 w-3.5 transition-transform ${open ? 'rotate-180' : ''}`} />
-              {open ? 'Hide details' : 'Details & playbook'}
+              {open ? 'Hide analysis' : 'AI analysis & fix code'}
             </button>
             <span className="inline-flex items-center gap-1"><Icon name="clock" className="h-3 w-3" /> Detected {timeAgo(rec.detectedAt)}</span>
             <span className="inline-flex items-center gap-1"><Icon name="wrench" className="h-3 w-3" /> ~{rec.effort} to fix</span>
+            {!canAutoFix && (
+              <span className="inline-flex items-center gap-1 text-slate-500" title={rec.autoFix?.reason}>
+                <Icon name="lock" className="h-3 w-3" /> Manual fix required
+              </span>
+            )}
           </div>
         </div>
 
@@ -92,14 +69,27 @@ export function RecommendationCard({ rec, index }) {
               <p className="text-[11px] text-slate-500">score if fixed</p>
             </div>
           )}
-          <button
-            type="button"
-            className={remediating ? 'btn-secondary w-full max-w-[10rem] text-brand-300' : 'btn-primary w-full max-w-[10rem]'}
-            disabled={remediating}
-            onClick={() => actions.remediate(rec)}
-          >
-            {remediating ? <><Spinner className="h-4 w-4" /> Remediating…</> : <><Icon name="bolt" className="h-4 w-4" /> Remediate</>}
-          </button>
+          {canAutoFix ? (
+            <button
+              type="button"
+              className={remediating ? 'btn-secondary w-full max-w-[10rem] text-brand-300' : 'btn-primary w-full max-w-[10rem]'}
+              disabled={remediating}
+              onClick={() => actions.autoFix(rec)}
+              title={`Runs the vetted playbook with a just-in-time grant: ${rec.autoFix.permission}`}
+            >
+              {remediating ? <><Spinner className="h-4 w-4" /> Fixing…</> : <><Icon name="bolt" className="h-4 w-4" /> Auto-Fix</>}
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="btn-secondary w-full max-w-[10rem]"
+              disabled={remediating}
+              onClick={() => actions.remediate(rec)}
+              title={`${rec.autoFix?.reason ?? ''} Mark resolved once you have applied the fix.`}
+            >
+              {remediating ? <><Spinner className="h-4 w-4" /> Resolving…</> : <><Icon name="check" className="h-4 w-4" /> Mark resolved</>}
+            </button>
+          )}
         </div>
       </div>
       {remediating && <div className="h-0.5 w-full overflow-hidden bg-brand-500/10"><div className="h-full w-1/3 animate-shimmer bg-brand-400" /></div>}
