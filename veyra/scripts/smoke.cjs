@@ -52,7 +52,7 @@ const scoreOf = async (page) => {
   await page.getByText('Validate permissions').waitFor();
   await page.screenshot({ path: `${shots}/autofix-progress.png` });
   await page.getByText(/^Fixed: /).waitFor({ timeout: 20000 });
-  const toastBody = await page.getByText(/^Security score \d+ → \d+/).innerText();
+  const toastBody = await page.getByText(/^Security score \d+ → \d+/).first().innerText();
   await page.screenshot({ path: `${shots}/autofix-done.png` });
   await page.waitForTimeout(1200);
   const after = await scoreOf(page);
