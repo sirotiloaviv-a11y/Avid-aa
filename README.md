@@ -1,6 +1,6 @@
 # Avid-aa
 
-Two independent security projects.
+Independent projects.
 
 ## [`moat/`](moat/README.md) — security scanner for AI agent configuration
 
@@ -21,3 +21,11 @@ No dependencies. Emits SARIF for GitHub code scanning.
 Monitors Hebrew-language news and Telegram sources for security events, matches
 them against a keyword ruleset that handles Hebrew prefixes, suffixes and
 niqqud, and dispatches alerts.
+
+## [`wolt-for-pros/`](wolt-for-pros/README.md) — on-demand tradesperson platform
+
+"Wolt for electricians and plumbers": clients book a licensed pro and track them
+live on a map. Pros work from a prepaid fee wallet (Stripe top-ups) that holds
+the fee when they accept a job and charges it when the client's completion code
+is verified. Underpriced closes are flagged and repeat offenders auto-suspended.
+Express + Prisma + Socket.io backend, Next.js + Tailwind + Leaflet frontend.

@@ -1,0 +1,120 @@
+// Wolt for Pros data model.
+//
+// String columns stand in for enums so the same schema runs on SQLite (local
+// development) and PostgreSQL. The allowed values are enforced in
+// src/domain/constants.js and listed next to each field.
+//
+// Money is Decimal throughout. Wallet.balance is the *available* balance;
+// fees held for in-flight jobs sit in Wallet.lockedBalance.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  name      String
+  phone     String   @unique
+  role      String   @default("client") // client | tradesperson | admin
+  latitude  Float?
+  longitude Float?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  profile    TradespersonProfile?
+  wallet     Wallet?
+  clientJobs Job[]                @relation("ClientJobs")
+  proJobs    Job[]                @relation("TradespersonJobs")
+
+  @@map("users")
+}
+
+model TradespersonProfile {
+  userId        String @id @map("user_id")
+  licenseNumber String @unique @map("license_number")
+  serviceType   String @map("service_type") // electrician | plumber | handyman
+  status        String @default("inactive") // active | inactive | suspended
+  fraudScore    Int    @default(0) @map("fraud_score")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("tradesperson_profiles")
+}
+
+model Wallet {
+  id             String  @id @default(cuid())
+  tradespersonId String  @unique @map("tradesperson_id")
+  balance        Decimal @default(0)
+  lockedBalance  Decimal @default(0) @map("locked_balance")
+
+  tradesperson User                @relation(fields: [tradespersonId], references: [id], onDelete: Cascade)
+  transactions WalletTransaction[]
+
+  @@map("wallets")
+}
+
+model Job {
+  id             String   @id @default(cuid())
+  clientId       String   @map("client_id")
+  tradespersonId String?  @map("tradesperson_id")
+  serviceType    String   @map("service_type") // electrician | plumber | handyman
+  description    String
+  address        String?
+  latitude       Float
+  longitude      Float
+  estimatedPrice Decimal  @map("estimated_price")
+  finalPrice     Decimal? @map("final_price")
+  completionCode String   @map("completion_code") // 4 digits, shown to the client only
+  codeAttempts   Int      @default(0) @map("code_attempts")
+  status         String   @default("requested") // requested | assigned | in_progress | completed | cancelled | flagged
+  // While the job is in flight: the fee held from the tradesperson's wallet.
+  // Once settled: the fee actually charged.
+  platformFee    Decimal? @map("platform_fee")
+
+  flaggedAt      DateTime? @map("flagged_at")
+  flagReason     String?   @map("flag_reason")
+  resolution     String? // approved | charged_estimate | voided
+  resolutionNote String?   @map("resolution_note")
+  resolvedAt     DateTime? @map("resolved_at")
+
+  assignedAt  DateTime? @map("assigned_at")
+  startedAt   DateTime? @map("started_at")
+  completedAt DateTime? @map("completed_at")
+  cancelledAt DateTime? @map("cancelled_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  client       User                @relation("ClientJobs", fields: [clientId], references: [id])
+  tradesperson User?               @relation("TradespersonJobs", fields: [tradespersonId], references: [id])
+  transactions WalletTransaction[]
+
+  @@index([status, serviceType])
+  @@index([tradespersonId, status])
+  @@index([tradespersonId, flaggedAt])
+  @@map("jobs")
+}
+
+model WalletTransaction {
+  id          String   @id @default(cuid())
+  walletId    String   @map("wallet_id")
+  // Signed. deposit +, fee_hold - (available -> locked), refund + (locked ->
+  // available), fee_deduction - (charged to the platform), adjustment +/-.
+  amount      Decimal
+  type        String // deposit | fee_hold | fee_deduction | refund | adjustment
+  jobId       String?  @map("job_id")
+  // Stripe Checkout Session id for deposits; unique so a webhook delivered
+  // twice credits the wallet once.
+  externalRef String?  @unique @map("external_ref")
+  note        String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  wallet Wallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  job    Job?   @relation(fields: [jobId], references: [id])
+
+  @@index([walletId, createdAt])
+  @@map("wallet_transactions")
+}
