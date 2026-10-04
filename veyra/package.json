@@ -1,0 +1,17 @@
+{
+  "name": "veyra-security-brain",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Veyra Security Brain: unified cybersecurity posture management prototype.",
+  "type": "module",
+  "scripts": {
+    "setup": "npm install --prefix server && npm install --prefix web",
+    "dev": "node scripts/dev.mjs",
+    "build": "npm run build --prefix web",
+    "start": "npm run build && npm start --prefix server",
+    "test": "npm test --prefix server"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

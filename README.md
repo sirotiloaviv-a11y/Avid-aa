@@ -1,6 +1,6 @@
 # Avid-aa
 
-Two independent security projects.
+Independent security projects.
 
 ## [`moat/`](moat/README.md) — security scanner for AI agent configuration
 
@@ -21,3 +21,16 @@ No dependencies. Emits SARIF for GitHub code scanning.
 Monitors Hebrew-language news and Telegram sources for security events, matches
 them against a keyword ruleset that handles Hebrew prefixes, suffixes and
 niqqud, and dispatches alerts.
+
+## [`veyra/`](veyra/README.md) — Veyra Security Brain
+
+Unified cybersecurity posture management prototype: an Express API with
+connectors for Google Workspace, Microsoft 365, AWS, Azure, GitHub and Slack
+(simulated findings), a 0–100 risk score, prioritized remediation
+recommendations, and a React + Tailwind dark-mode executive dashboard.
+
+```bash
+cd veyra && npm run setup && npm run dev   # http://127.0.0.1:5173
+```
+
+[Full documentation →](veyra/README.md)

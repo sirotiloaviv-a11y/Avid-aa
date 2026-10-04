@@ -1,0 +1,71 @@
+name: veyra
+
+on:
+  push:
+    paths:
+      - "veyra/**"
+      - ".github/workflows/veyra.yml"
+  pull_request:
+    paths:
+      - "veyra/**"
+      - ".github/workflows/veyra.yml"
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: veyra
+
+jobs:
+  api:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: ["20", "22"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+      - name: Install API dependencies
+        run: npm install --prefix server --no-audit --no-fund
+      - name: Run API tests
+        run: npm test
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install dependencies
+        run: |
+          npm install --prefix server --no-audit --no-fund
+          npm install --prefix web --no-audit --no-fund
+      - name: Build the dashboard
+        run: npm run build
+      - name: Install Playwright
+        working-directory: ${{ runner.temp }}
+        run: |
+          mkdir pw && cd pw && npm init -y >/dev/null
+          npm install --no-audit --no-fund playwright@1.49.1
+          npx playwright install --with-deps chromium
+      - name: Start the API serving the built dashboard
+        run: |
+          VEYRA_REMEDIATION_DELAY_MS=1500 nohup npm start --prefix server > server.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:4000/api/health && exit 0; sleep 1; done
+          cat server.log; exit 1
+      - name: Browser smoke test
+        run: NODE_PATH=${{ runner.temp }}/pw/node_modules node scripts/smoke.cjs http://127.0.0.1:4000
+      - name: Server log
+        if: always()
+        run: cat server.log || true
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: veyra-screenshots
+          path: veyra/screenshots
+          if-no-files-found: ignore

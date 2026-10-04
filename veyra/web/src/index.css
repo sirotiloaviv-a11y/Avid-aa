@@ -1,0 +1,55 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html { color-scheme: dark; }
+  body {
+    min-height: 100vh;
+    background:
+      radial-gradient(1200px 600px at 85% -10%, rgba(56, 213, 240, 0.07), transparent 60%),
+      radial-gradient(900px 500px at -10% 110%, rgba(99, 102, 241, 0.07), transparent 60%),
+      #05080f;
+    background-attachment: fixed;
+  }
+  ::selection { background: rgba(56, 213, 240, 0.3); }
+  :focus-visible { outline: 2px solid #38d5f0; outline-offset: 2px; border-radius: 6px; }
+}
+
+@layer components {
+  .card {
+    @apply rounded-2xl border border-white/[0.06] bg-ink-900/80 shadow-card backdrop-blur;
+  }
+  .card-header {
+    @apply flex items-center justify-between gap-3 border-b border-white/[0.06] px-5 py-4;
+  }
+  .eyebrow {
+    @apply text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500;
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium transition
+      disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply btn bg-gradient-to-r from-brand-500 to-indigo-500 text-white shadow-glow hover:brightness-110;
+  }
+  .btn-secondary {
+    @apply btn border border-white/10 bg-white/[0.04] text-slate-200 hover:bg-white/[0.08];
+  }
+  .btn-ghost {
+    @apply btn text-slate-400 hover:bg-white/[0.05] hover:text-slate-200;
+  }
+  .btn-danger {
+    @apply btn border border-rose-500/30 bg-rose-500/10 text-rose-300 hover:bg-rose-500/20;
+  }
+  .input {
+    @apply w-full rounded-lg border border-white/10 bg-ink-950/70 px-3 py-2 text-sm text-slate-100 placeholder-slate-600
+      transition focus:border-brand-400/60 focus:outline-none focus:ring-2 focus:ring-brand-400/20;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition;
+  }
+  .tabular { font-variant-numeric: tabular-nums; }
+}
+
+.scrollbar-thin { scrollbar-width: thin; scrollbar-color: #26344f transparent; }
