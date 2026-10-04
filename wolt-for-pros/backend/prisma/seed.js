@@ -10,6 +10,7 @@ const FEE_RATE = Number(process.env.PLATFORM_FEE_RATE || 0.15);
 
 const code = () => generateCompletionCode(crypto.randomInt);
 const estimateCents = (type) => estimateFor(type).estimate * 100;
+const electricianEstimate = () => estimateCents('electrician');
 
 async function createPro({ name, phone, license, serviceType, lat, lng, deposit }) {
   return prisma.user.create({
@@ -32,6 +33,9 @@ async function createPro({ name, phone, license, serviceType, lat, lng, deposit 
 }
 
 async function main() {
+  await prisma.review.deleteMany();
+  await prisma.message.deleteMany();
+  await prisma.jobPhoto.deleteMany();
   await prisma.walletTransaction.deleteMany();
   await prisma.job.deleteMany();
   await prisma.wallet.deleteMany();
@@ -72,6 +76,40 @@ async function main() {
       },
     });
   }
+
+  // Past jobs Dana rated, so Yossi starts with a real rating history. (History
+  // only: their fees are not part of the seeded wallet ledger.)
+  const pastReviews = [
+    { rating: 5, comment: 'Arrived in 20 minutes and fixed the short. Very clean work.' },
+    { rating: 5, comment: 'Explained everything and the price matched the estimate.' },
+    { rating: 4, comment: 'Good job, a bit late.' },
+  ];
+  for (const [i, r] of pastReviews.entries()) {
+    const done = new Date(Date.now() - (i + 2) * 7 * 24 * 60 * 60 * 1000);
+    const past = await prisma.job.create({
+      data: {
+        clientId: dana.id,
+        tradespersonId: yossi.id,
+        serviceType: 'electrician',
+        description: ['Replace kitchen light fixture', 'Install a dedicated AC circuit', 'Fix a dead wall socket'][i],
+        latitude: 32.0853,
+        longitude: 34.7818,
+        estimatedPrice: fromCents(electricianEstimate()),
+        finalPrice: fromCents(electricianEstimate()),
+        platformFee: fromCents(feeCents(electricianEstimate(), FEE_RATE)),
+        completionCode: code(),
+        status: 'completed',
+        completedAt: done,
+        createdAt: done,
+      },
+    });
+    await prisma.review.create({ data: { jobId: past.id, clientId: dana.id, tradespersonId: yossi.id, rating: r.rating, comment: r.comment, createdAt: done } });
+  }
+  const avg = pastReviews.reduce((s, r) => s + r.rating, 0) / pastReviews.length;
+  await prisma.tradespersonProfile.update({
+    where: { userId: yossi.id },
+    data: { rating: Math.round(avg * 100) / 100, ratingCount: pastReviews.length },
+  });
 
   // One open dispute: Yossi closed a ₪450 job at ₪150. His fee is still held.
   const est = estimateCents('electrician');

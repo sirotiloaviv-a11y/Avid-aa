@@ -14,6 +14,13 @@ const TOP_UP_MAX = 5000;
 // Wrong completion-code guesses allowed before the job locks for review.
 const MAX_CODE_ATTEMPTS = 5;
 
+// Problem photos per job, and the largest accepted upload.
+const MAX_JOB_PHOTOS = 5;
+const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
+
+// Chat
+const MAX_MESSAGE_LENGTH = 1000;
+
 // How far the job radar looks, in kilometres.
 const DEFAULT_RADAR_RADIUS_KM = 25;
 
@@ -30,4 +37,7 @@ module.exports = {
   TOP_UP_MAX,
   MAX_CODE_ATTEMPTS,
   DEFAULT_RADAR_RADIUS_KM,
+  MAX_JOB_PHOTOS,
+  MAX_UPLOAD_BYTES,
+  MAX_MESSAGE_LENGTH,
 };

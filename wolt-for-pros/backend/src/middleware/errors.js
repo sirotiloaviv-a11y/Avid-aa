@@ -41,6 +41,10 @@ function errorHandler(err, req, res, next) {
   if (err && err.type === 'entity.too.large') {
     return res.status(413).json({ error: { message: 'Request body too large', code: 'TOO_LARGE' } });
   }
+  // Other client errors raised by Express middleware (http-errors).
+  if (err && err.expose && err.status >= 400 && err.status < 500) {
+    return res.status(err.status).json({ error: { message: err.message, code: 'BAD_REQUEST' } });
+  }
   if (err && err.type === 'entity.parse.failed') {
     return res.status(400).json({ error: { message: 'Malformed JSON body', code: 'BAD_JSON' } });
   }

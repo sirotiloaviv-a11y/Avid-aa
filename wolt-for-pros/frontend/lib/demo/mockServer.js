@@ -8,7 +8,7 @@
 
 import { ApiError } from '../errors.js';
 
-const STORAGE_KEY = 'wfp_demo_state_v1';
+const STORAGE_KEY = 'wfp_demo_state_v2';
 const FEE_RATE = 0.15;
 const MAX_CODE_ATTEMPTS = 5;
 const FLAG_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
@@ -31,6 +31,14 @@ export const DEMO_PHONE_BY_ROLE = {
 
 export const DEMO_ACTIVE_JOB_ID = 'job_outlet';
 
+// Seeded problem photos: small drawings, so the demo needs no network.
+const svgPhoto = (body) => `data:image/svg+xml;utf8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 240">${body}</svg>`)}`;
+const PHOTOS = {
+  burntSocket: svgPhoto('<rect width="320" height="240" fill="#e9e4da"/><rect x="95" y="45" width="130" height="150" rx="16" fill="#f8f6f1" stroke="#c9c2b4" stroke-width="3"/><radialGradient id="s" cx=".55" cy=".45" r=".5"><stop offset="0" stop-color="#2b1d12" stop-opacity=".95"/><stop offset=".6" stop-color="#5a3a1f" stop-opacity=".55"/><stop offset="1" stop-color="#5a3a1f" stop-opacity="0"/></radialGradient><ellipse cx="172" cy="112" rx="70" ry="58" fill="url(#s)"/><circle cx="160" cy="120" r="34" fill="#efece6" stroke="#bdb5a6" stroke-width="2"/><rect x="146" y="108" width="6" height="22" rx="2" fill="#3b3b3b"/><rect x="168" y="108" width="6" height="22" rx="2" fill="#3b3b3b"/><text x="160" y="222" font-family="sans-serif" font-size="13" text-anchor="middle" fill="#6b6457">Kitchen counter socket</text>'),
+  wiring: svgPhoto('<rect width="320" height="240" fill="#2f3438"/><rect x="40" y="30" width="240" height="180" rx="10" fill="#d9dde1"/><g fill="#9aa3ab"><rect x="60" y="60" width="30" height="56" rx="4"/><rect x="104" y="60" width="30" height="56" rx="4"/><rect x="148" y="60" width="30" height="56" rx="4"/><rect x="192" y="60" width="30" height="56" rx="4"/><rect x="236" y="60" width="30" height="56" rx="4"/></g><rect x="148" y="60" width="30" height="56" rx="4" fill="#d6453d"/><path d="M70 150 C110 135 130 175 170 158 S240 140 260 160" stroke="#c0392b" stroke-width="5" fill="none"/><path d="M70 170 C120 160 140 190 180 178 S240 165 260 182" stroke="#2c3e50" stroke-width="5" fill="none"/><text x="160" y="205" font-family="sans-serif" font-size="13" text-anchor="middle" fill="#4a5259">Breaker 3 keeps tripping</text>'),
+  sink: svgPhoto('<rect width="320" height="240" fill="#dfe8ec"/><rect x="30" y="70" width="260" height="20" rx="4" fill="#b8c4ca"/><ellipse cx="160" cy="130" rx="105" ry="55" fill="#f4f7f8" stroke="#9fb0b8" stroke-width="4"/><ellipse cx="160" cy="138" rx="80" ry="34" fill="#8aa7b4" opacity=".75"/><ellipse cx="160" cy="140" rx="12" ry="6" fill="#3d4f57"/><rect x="150" y="30" width="20" height="45" rx="6" fill="#9aa8ae"/><text x="160" y="222" font-family="sans-serif" font-size="13" text-anchor="middle" fill="#55666e">Water not draining</text>'),
+};
+
 // ---------------------------------------------------------------------------
 // Seed
 
@@ -46,9 +54,9 @@ function seed() {
     { id: 'u_avi', name: 'Avi Mizrahi', phone: '0504444444', role: 'tradesperson', latitude: 32.0600, longitude: 34.7750 },
   ];
   const profiles = {
-    u_yossi: { licenseNumber: 'EL-48213', serviceType: 'electrician', status: 'active', fraudScore: 0 },
-    u_moshe: { licenseNumber: 'PL-11902', serviceType: 'plumber', status: 'active', fraudScore: 0 },
-    u_avi: { licenseNumber: 'HM-73001', serviceType: 'handyman', status: 'active', fraudScore: 1 },
+    u_yossi: { licenseNumber: 'EL-48213', serviceType: 'electrician', status: 'active', fraudScore: 0, rating: 4.67, ratingCount: 3 },
+    u_moshe: { licenseNumber: 'PL-11902', serviceType: 'plumber', status: 'active', fraudScore: 0, rating: 0, ratingCount: 0 },
+    u_avi: { licenseNumber: 'HM-73001', serviceType: 'handyman', status: 'active', fraudScore: 1, rating: 3.5, ratingCount: 2 },
   };
   const wallets = {
     u_yossi: { id: 'w_yossi', balance: 35000, locked: 5000 },
@@ -58,6 +66,7 @@ function seed() {
 
   const job = (over) => ({
     tradespersonId: null,
+    photos: [],
     address: null,
     finalCents: null,
     feeCents: null,
@@ -88,6 +97,7 @@ function seed() {
       estimatedCents: 40000,
       feeCents: 6000,
       completionCode: '4829',
+      photos: [PHOTOS.burntSocket],
       status: 'assigned',
       assignedAt: minutesAgo(6),
       createdAt: minutesAgo(9),
@@ -130,6 +140,7 @@ function seed() {
       clientId: 'u_omer',
       serviceType: 'electrician',
       description: 'Breaker trips whenever the AC and oven run together',
+      photos: [PHOTOS.wiring],
       address: 'Allenby St 50, Tel Aviv',
       latitude: 32.0680,
       longitude: 34.7710,
@@ -142,6 +153,7 @@ function seed() {
       clientId: 'u_dana',
       serviceType: 'plumber',
       description: 'Kitchen sink is blocked and draining very slowly',
+      photos: [PHOTOS.sink],
       address: 'Ben Yehuda St 80, Tel Aviv',
       latitude: 32.0830,
       longitude: 34.7700,
@@ -159,7 +171,18 @@ function seed() {
     { id: 't5', userId: 'u_avi', amountCents: -6000, type: 'fee_hold', jobId: 'job_flagged', note: 'Platform fee held on job acceptance', createdAt: minutesAgo(60 * 28) },
   ];
 
-  return { seq: 100, users, profiles, wallets, jobs, transactions };
+  // Yossi's rating history (3 past jobs for Dana) behind his 4.67 average.
+  const reviews = [
+    { id: 'r1', jobId: 'job_past_1', clientId: 'u_dana', tradespersonId: 'u_yossi', rating: 5, comment: 'Arrived in 20 minutes and fixed the short. Very clean work.', createdAt: minutesAgo(60 * 24 * 14) },
+    { id: 'r2', jobId: 'job_past_2', clientId: 'u_dana', tradespersonId: 'u_yossi', rating: 5, comment: 'Explained everything and the price matched the estimate.', createdAt: minutesAgo(60 * 24 * 21) },
+    { id: 'r3', jobId: 'job_past_3', clientId: 'u_dana', tradespersonId: 'u_yossi', rating: 4, comment: 'Good job, a bit late.', createdAt: minutesAgo(60 * 24 * 28) },
+  ];
+  const messages = [
+    { id: 'm1', jobId: DEMO_ACTIVE_JOB_ID, senderId: 'u_yossi', body: 'Hi Dana, Yossi here. On my way, I have a replacement socket with me.', createdAt: minutesAgo(5) },
+    { id: 'm2', jobId: DEMO_ACTIVE_JOB_ID, senderId: 'u_dana', body: 'Great, thanks! Building code is 1290, 3rd floor.', createdAt: minutesAgo(4) },
+  ];
+
+  return { seq: 100, users, profiles, wallets, jobs, transactions, reviews, messages };
 }
 
 // ---------------------------------------------------------------------------
@@ -175,7 +198,7 @@ function db() {
   } catch {
     state = null;
   }
-  if (!state || !Array.isArray(state.jobs)) state = seed();
+  if (!state || !Array.isArray(state.jobs) || !Array.isArray(state.messages)) state = seed();
   return state;
 }
 
@@ -304,7 +327,11 @@ function serializeJob(job, viewer) {
     completedAt: job.completedAt,
     cancelledAt: job.cancelledAt,
     createdAt: job.createdAt,
+    photos: job.photos || [],
+    review: null,
   };
+  const review = db().reviews.find((r) => r.jobId === job.id);
+  if (review) out.review = { rating: review.rating, comment: review.comment, createdAt: review.createdAt };
   if (isClient || isAdmin) out.completionCode = job.completionCode;
   if (isAdmin) out.codeAttempts = job.codeAttempts;
 
@@ -324,6 +351,8 @@ function serializeJob(job, viewer) {
       longitude: pro.longitude,
       licenseNumber: p && p.licenseNumber,
       serviceType: p && p.serviceType,
+      rating: p ? p.rating : 0,
+      ratingCount: p ? p.ratingCount : 0,
     };
     if (isAdmin) {
       out.tradesperson.status = p && p.status;
@@ -442,6 +471,65 @@ function moveTradesperson(userId, { lat, lng }) {
 }
 
 // ---------------------------------------------------------------------------
+// Chat
+
+function serializeMessage(m, job) {
+  const sender = findUser(m.senderId);
+  return {
+    id: m.id,
+    jobId: m.jobId,
+    senderId: m.senderId,
+    senderRole: m.senderId === job.clientId ? 'client' : 'tradesperson',
+    senderName: sender ? sender.name : undefined,
+    body: m.body,
+    createdAt: m.createdAt,
+  };
+}
+
+const DEMO_REPLIES = {
+  tradesperson: ['Got it, thanks!', 'No problem, see you soon.', 'Noted 👍'],
+  client: ['Thanks, I am at home.', 'Perfect, see you soon!', 'Great, thank you.'],
+};
+
+function sendDemoMessage(user, jobId, rawBody) {
+  if (!user) fail(401, 'Invalid or expired token', 'UNAUTHENTICATED');
+  const job = findJob(jobId);
+  if (job.clientId !== user.id && job.tradespersonId !== user.id) fail(403, 'Only the client and the assigned pro can chat', 'FORBIDDEN');
+  if (!isActive(job)) fail(409, 'Chat is open only while a pro is assigned to the job', 'CHAT_CLOSED');
+  const text = String(rawBody || '').trim();
+  if (!text) fail(400, 'Message is empty', 'EMPTY_MESSAGE');
+  if (text.length > 1000) fail(400, 'Messages can be up to 1000 characters', 'MESSAGE_TOO_LONG');
+  const message = { id: nextId('m'), jobId: job.id, senderId: user.id, body: text, createdAt: new Date().toISOString() };
+  db().messages.push(message);
+  save();
+  dispatch('message:new', serializeMessage(message, job));
+
+  // Demo only: the other side answers, so one person can try the chat.
+  const otherId = user.id === job.clientId ? job.tradespersonId : job.clientId;
+  const otherRole = user.id === job.clientId ? 'tradesperson' : 'client';
+  setTimeout(() => {
+    if (!isActive(job)) return;
+    const options = DEMO_REPLIES[otherRole];
+    const reply = { id: nextId('m'), jobId: job.id, senderId: otherId, body: options[db().messages.length % options.length], createdAt: new Date().toISOString() };
+    db().messages.push(reply);
+    save();
+    dispatch('message:new', serializeMessage(reply, job));
+  }, 2200);
+  return serializeMessage(message, job);
+}
+
+function isAllowedDemoPhoto(url) {
+  if (typeof url !== 'string') return false;
+  if (url.startsWith('data:image/')) return url.length < 2_000_000;
+  if (/^\/uploads\/[a-f0-9]{32}\.(jpg|png|webp)$/.test(url)) return true;
+  try {
+    return new URL(url).protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Socket messages from the page
 
 let currentUserId = null;
@@ -457,6 +545,14 @@ function handleSocketEmit(event, payload) {
       location = { jobId: job.id, lat: pro.latitude, lng: pro.longitude, distanceKm, etaMinutes: Math.ceil((distanceKm / AVERAGE_SPEED_KMH) * 60), at: null };
     }
     return { ok: true, location };
+  }
+  if (event === 'send_message') {
+    const user = currentUserId && findUser(currentUserId);
+    try {
+      return { ok: true, message: sendDemoMessage(user, payload.jobId, payload.body) };
+    } catch (err) {
+      return { ok: false, code: err.code, error: err.message };
+    }
   }
   if (event === 'location:update') {
     const user = currentUserId && findUser(currentUserId);
@@ -567,6 +663,9 @@ const routes = [
     requireRole(user, 'client');
     const svc = CATALOG.find((c) => c.type === body.serviceType) || fail(400, 'serviceType: Pick a service', 'VALIDATION_ERROR');
     if (!body.description || body.description.trim().length < 5) fail(400, 'description: Describe the problem in a few words', 'VALIDATION_ERROR');
+    const photos = Array.isArray(body.photos) ? body.photos : [];
+    if (photos.length > 5) fail(400, 'photos: Up to 5 photos', 'VALIDATION_ERROR');
+    if (!photos.every(isAllowedDemoPhoto)) fail(400, 'photos: Use an uploaded photo or an https image URL', 'VALIDATION_ERROR');
     const job = {
       id: nextId('job'),
       clientId: user.id,
@@ -580,6 +679,7 @@ const routes = [
       finalCents: null,
       feeCents: null,
       completionCode: String(Math.floor(Math.random() * 10000)).padStart(4, '0'),
+      photos,
       codeAttempts: 0,
       status: 'requested',
       flaggedAt: null, flagReason: null, resolution: null, resolutionNote: null, resolvedAt: null,
@@ -706,6 +806,30 @@ const routes = [
     notifyWallet(user.id);
     return { outcome, suspended, job: serializeJob(job, user) };
   }, { auth: true }],
+  ['POST', /^\/api\/jobs\/([^/]+)\/review$/, ({ user, params, body }) => {
+    requireRole(user, 'client');
+    const job = findJob(params[0]);
+    if (job.clientId !== user.id) fail(403, 'Only the client who booked this job can rate it', 'FORBIDDEN');
+    if (job.status !== 'completed' || !job.tradespersonId) fail(409, 'You can rate a job once it is completed', 'NOT_COMPLETED');
+    const rating = Number(body.rating);
+    if (!Number.isInteger(rating) || rating < 1 || rating > 5) fail(400, 'rating: Rate from 1 to 5 stars', 'VALIDATION_ERROR');
+    const s = db();
+    if (s.reviews.some((r) => r.jobId === job.id)) fail(409, 'You already rated this job', 'ALREADY_REVIEWED');
+    const review = { id: nextId('r'), jobId: job.id, clientId: user.id, tradespersonId: job.tradespersonId, rating, comment: body.comment ? String(body.comment).trim().slice(0, 1000) : null, createdAt: new Date().toISOString() };
+    s.reviews.push(review);
+    const mine = s.reviews.filter((r) => r.tradespersonId === job.tradespersonId);
+    const p = profileOf(job.tradespersonId);
+    p.rating = Math.round((mine.reduce((sum, r) => sum + r.rating, 0) / mine.length) * 100) / 100;
+    p.ratingCount = mine.length;
+    dispatch('review:new', { review, rating: p.rating, ratingCount: p.ratingCount });
+    return { review: { id: review.id, jobId: job.id, rating, comment: review.comment, createdAt: review.createdAt }, tradesperson: { rating: p.rating, ratingCount: p.ratingCount } };
+  }, { auth: true }],
+  ['GET', /^\/api\/jobs\/([^/]+)\/messages$/, ({ user, params }) => {
+    const job = findJob(params[0]);
+    if (user.role !== 'admin' && job.clientId !== user.id && job.tradespersonId !== user.id) fail(403, 'You are not part of this job', 'FORBIDDEN');
+    return { messages: db().messages.filter((m) => m.jobId === job.id).map((m) => serializeMessage(m, job)) };
+  }, { auth: true }],
+  ['POST', /^\/api\/jobs\/([^/]+)\/messages$/, ({ user, params, body }) => ({ message: sendDemoMessage(user, params[0], body.body) }), { auth: true }],
   ['POST', /^\/api\/jobs\/([^/]+)\/cancel$/, ({ user, params, body }) => {
     const job = findJob(params[0]);
     const isClient = job.clientId === user.id;

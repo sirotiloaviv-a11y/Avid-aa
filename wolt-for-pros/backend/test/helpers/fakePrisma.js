@@ -4,12 +4,13 @@
 // nested create and include. Decimal columns are kept as strings like Prisma
 // returns them. $transaction rolls back on throw (sequential use only).
 const DECIMAL_FIELDS = new Set(['balance', 'lockedBalance', 'amount', 'estimatedPrice', 'finalPrice', 'platformFee']);
-const KEYS = { user: 'id', tradespersonProfile: 'userId', wallet: 'id', job: 'id', walletTransaction: 'id' };
-const UNIQUES = { user: ['phone'], tradespersonProfile: ['licenseNumber'], wallet: ['tradespersonId'], walletTransaction: ['externalRef'] };
+const MODELS = ['user', 'tradespersonProfile', 'wallet', 'job', 'walletTransaction', 'jobPhoto', 'message', 'review'];
+const KEYS = { user: 'id', tradespersonProfile: 'userId', wallet: 'id', job: 'id', walletTransaction: 'id', jobPhoto: 'id', message: 'id', review: 'id' };
+const UNIQUES = { user: ['phone'], tradespersonProfile: ['licenseNumber'], wallet: ['tradespersonId'], walletTransaction: ['externalRef'], review: ['jobId'] };
 const DEFAULTS = {
   wallet: { balance: '0.00', lockedBalance: '0.00' },
   job: { codeAttempts: 0, status: 'requested', tradespersonId: null, platformFee: null, finalPrice: null, flaggedAt: null, resolution: null },
-  tradespersonProfile: { fraudScore: 0, status: 'inactive' },
+  tradespersonProfile: { fraudScore: 0, status: 'inactive', rating: 0, ratingCount: 0 },
   user: { latitude: null, longitude: null },
 };
 
@@ -43,7 +44,8 @@ function matchWhere(row, where = {}) {
 }
 
 function createFakePrisma() {
-  let db = { user: [], tradespersonProfile: [], wallet: [], job: [], walletTransaction: [] };
+  const empty = () => Object.fromEntries(MODELS.map((m) => [m, []]));
+  let db = empty();
   let seq = 0;
 
   const withRelations = (model, row, include) => {
@@ -52,7 +54,17 @@ function createFakePrisma() {
     for (const [rel, spec] of Object.entries(include)) {
       if (!spec) continue;
       let related = null;
+      if (model === 'job' && rel === 'photos') {
+        out.photos = db.jobPhoto.filter((p) => p.jobId === row.id).map((p) => ({ ...p }));
+        continue;
+      }
+      if (model === 'job' && rel === 'review') {
+        const review = db.review.find((r) => r.jobId === row.id);
+        out.review = review ? { ...review } : null;
+        continue;
+      }
       if (model === 'job' && rel === 'client') related = db.user.find((u) => u.id === row.clientId);
+      else if (model === 'message' && rel === 'sender') related = db.user.find((u) => u.id === row.senderId);
       else if (model === 'job' && rel === 'tradesperson') related = db.user.find((u) => u.id === row.tradespersonId);
       else if (model === 'user' && rel === 'profile') related = db.tradespersonProfile.find((p) => p.userId === row.id);
       else if (model === 'user' && rel === 'wallet') related = db.wallet.find((w) => w.tradespersonId === row.id);
@@ -104,6 +116,12 @@ function createFakePrisma() {
       return db[name].filter((r) => matchWhere(r, where)).length;
     },
     /** @param {any} args */
+    async aggregate({ where, _avg = {}, _count = null }) {
+      const rows = db[name].filter((r) => matchWhere(r, where));
+      const avg = Object.fromEntries(Object.keys(_avg).map((f) => [f, rows.length ? rows.reduce((s, r) => s + Number(r[f]), 0) / rows.length : null]));
+      return { _avg: avg, _count: _count ? { _all: rows.length } : undefined };
+    },
+    /** @param {any} args */
     async create({ data, include }) {
       seq += 1;
       const row = { createdAt: new Date(), ...DEFAULTS[name], [KEYS[name]]: data[KEYS[name]] || `${name}_${seq}` };
@@ -153,10 +171,10 @@ function createFakePrisma() {
     },
     async $disconnect() {},
     _reset() {
-      db = { user: [], tradespersonProfile: [], wallet: [], job: [], walletTransaction: [] };
+      db = empty();
     },
   };
-  for (const name of Object.keys(KEYS)) Object.defineProperty(client, name, { get: () => model(name) });
+  for (const name of MODELS) Object.defineProperty(client, name, { get: () => model(name) });
   return client;
 }
 

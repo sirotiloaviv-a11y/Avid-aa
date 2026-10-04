@@ -25,10 +25,13 @@ model User {
   longitude Float?
   createdAt DateTime @default(now()) @map("created_at")
 
-  profile    TradespersonProfile?
-  wallet     Wallet?
-  clientJobs Job[]                @relation("ClientJobs")
-  proJobs    Job[]                @relation("TradespersonJobs")
+  profile         TradespersonProfile?
+  wallet          Wallet?
+  clientJobs      Job[]                @relation("ClientJobs")
+  proJobs         Job[]                @relation("TradespersonJobs")
+  messagesSent    Message[]            @relation("MessagesSent")
+  reviewsGiven    Review[]             @relation("ReviewsGiven")
+  reviewsReceived Review[]             @relation("ReviewsReceived")
 
   @@map("users")
 }
@@ -39,6 +42,9 @@ model TradespersonProfile {
   serviceType   String @map("service_type") // electrician | plumber | handyman
   status        String @default("inactive") // active | inactive | suspended
   fraudScore    Int    @default(0) @map("fraud_score")
+  // Average of all reviews, recomputed from the Review table on each new one.
+  rating        Float  @default(0)
+  ratingCount   Int    @default(0) @map("rating_count")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -91,6 +97,9 @@ model Job {
   client       User                @relation("ClientJobs", fields: [clientId], references: [id])
   tradesperson User?               @relation("TradespersonJobs", fields: [tradespersonId], references: [id])
   transactions WalletTransaction[]
+  photos       JobPhoto[]
+  messages     Message[]
+  review       Review?
 
   @@index([status, serviceType])
   @@index([tradespersonId, status])
@@ -117,4 +126,51 @@ model WalletTransaction {
 
   @@index([walletId, createdAt])
   @@map("wallet_transactions")
+}
+
+// Problem photos attached by the client: an uploaded file ("/uploads/...")
+// or an external https URL.
+model JobPhoto {
+  id        String   @id @default(cuid())
+  jobId     String   @map("job_id")
+  url       String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId])
+  @@map("job_photos")
+}
+
+// Chat between the client and the assigned tradesperson of a job.
+model Message {
+  id        String   @id @default(cuid())
+  jobId     String   @map("job_id")
+  senderId  String   @map("sender_id")
+  body      String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  job    Job  @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  sender User @relation("MessagesSent", fields: [senderId], references: [id])
+
+  @@index([jobId, createdAt])
+  @@map("messages")
+}
+
+// One review per completed job, written by its client.
+model Review {
+  id             String   @id @default(cuid())
+  jobId          String   @unique @map("job_id")
+  clientId       String   @map("client_id")
+  tradespersonId String   @map("tradesperson_id")
+  rating         Int // 1-5
+  comment        String?
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  job          Job  @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  client       User @relation("ReviewsGiven", fields: [clientId], references: [id])
+  tradesperson User @relation("ReviewsReceived", fields: [tradespersonId], references: [id])
+
+  @@index([tradespersonId])
+  @@map("reviews")
 }

@@ -123,6 +123,28 @@ Concurrency: holds, releases and job status changes are conditional
 `WHERE status = 'requested'`). Two pros racing for the same job cannot both win,
 and the loser's hold rolls back.
 
+## Ratings, chat and photos
+
+- **Ratings.** When a job completes, the client is asked for 1-5 stars and an
+  optional comment. There is one `Review` per job. `TradespersonProfile.rating`
+  and `ratingCount` are recomputed from all of the pro's reviews in the same
+  transaction, so the average cannot drift. Flagged jobs can be rated once an
+  admin resolves them as completed. Ratings show on the client's tracking card,
+  the pro's dashboard and the admin table.
+- **Chat.** The client and the assigned pro can message each other while the
+  job is `assigned` or `in_progress`. The history stays readable afterwards,
+  and to admins for disputes. Messages go over Socket.io, with REST as a
+  fallback, and are limited to 1,000 characters and about 3 per second per
+  socket.
+- **Photos.** The browser shrinks photos to 1600 px JPEG, uploads them to
+  `/api/uploads`, and attaches the URLs to the job. The server checks the file
+  type from its bytes, stores it under a random 128-bit name in `UPLOAD_DIR`,
+  and serves it at `/uploads/…`. Pros see the photos on the radar and in the
+  review-and-accept modal before they commit.
+
+In demo mode, photos stay in the browser, and the other side of the chat
+answers automatically so one person can try it.
+
 ## Anti-fraud rules
 
 - `final_price < 50% × estimated_price` → job `flagged`, `fraud_score + 1`, fee
@@ -153,7 +175,8 @@ except auth, catalog and webhooks. Errors look like
 | POST | `/webhooks/stripe` | Stripe | `checkout.session.completed` credits the wallet |
 | GET | `/pros/me` | tradesperson | Profile, wallet, active job |
 | POST | `/pros/me/availability` | tradesperson | Go online / offline |
-| POST | `/jobs/create` | client | New request (`serviceType, description, latitude, longitude, address?`) |
+| POST | `/uploads` | client | Raw image body (`image/jpeg`, `png`, `webp`, ≤5 MB) → `{ url }` |
+| POST | `/jobs/create` | client | New request (`serviceType, description, latitude, longitude, address?, photos?`) with up to 5 photo URLs (uploads or https) |
 | GET | `/jobs/mine` | any | My jobs |
 | GET | `/jobs/nearby` | tradesperson | Radar: open jobs of my trade within `radiusKm`, with fee, payout and `canAfford` |
 | GET | `/jobs/:id` | participant / admin | One job (code included for its client only) |
@@ -161,6 +184,9 @@ except auth, catalog and webhooks. Errors look like
 | POST | `/jobs/:id/start` | tradesperson | Arrived: `assigned` → `in_progress` |
 | POST | `/jobs/:id/verify-and-complete` | tradesperson | `{ completionCode, finalPrice }` |
 | POST | `/jobs/:id/cancel` | participant / admin | Release the hold (a pro releasing puts the job back on the radar) |
+| POST | `/jobs/:id/review` | client | `{ rating: 1-5, comment? }`, once per completed job; updates the pro's average |
+| GET | `/jobs/:id/messages` | participant / admin | Chat history |
+| POST | `/jobs/:id/messages` | client / assigned pro | `{ body }`: REST twin of the `send_message` socket event |
 | GET | `/admin/flagged-jobs?state=open\|resolved\|all` | admin | Disputes |
 | POST | `/admin/flagged-jobs` | admin | `{ jobId, action: approve\|charge_estimate\|void, note? }` |
 | GET | `/admin/tradespeople` | admin | Status, flags in window, balances |
@@ -175,6 +201,9 @@ tradespeople join `pros:<serviceType>`, and admins join `admins`.
 | Direction | Event | Payload |
 |-----------|-------|---------|
 | client → server | `job:subscribe` (ack) | `{ jobId }` → `{ ok, location }` with the last known pro position |
+| client / pro → server | `send_message` (ack) | `{ jobId, body }` → `{ ok, message }` or `{ ok: false, code, error }`, active jobs only |
+| server → both parties | `message:new` | a chat message |
+| server → pro | `review:new` | `{ review, rating, ratingCount }` |
 | pro → server | `location:update` (ack) | `{ lat, lng, heading? }`, throttled to 1/s and persisted every 15 s |
 | server → job room | `pro:location` | `{ jobId, lat, lng, distanceKm, etaMinutes, at }` |
 | server → participants | `job:updated` | the job (never includes the code) |
@@ -223,6 +252,9 @@ None of them need a database or network:
   checks and lockout, settlement and refunds, cancel and release, flagging and
   auto-suspension, admin rulings, ledger reconciliation and Stripe
   idempotency.
+- `backend/test/features.test.js`: ratings (once, after completion, the
+  average), chat (participants only, active jobs only, delivery to both
+  sides) and photos (URL rules, byte-sniffed uploads).
 - `backend/test/security.test.js`: phone normalisation, rate limiter windows
   and fail-open, dev SMS codes (single use, exact length).
 - `frontend/test/mockServer.test.mjs`: the demo scenario and its money rules
@@ -271,6 +303,11 @@ This is a complete MVP, not a hardened deployment. Known gaps:
 - **One API instance only.** The live location cache and the default rate-limit
   counters are in memory. Use the Socket.io Redis adapter and `RedisStore` to
   run more than one instance.
+- **Photo storage.** Uploads go to local disk: mount a persistent volume, or
+  switch `services/storageService.js` to object storage. Photo URLs are
+  unguessable but not access-checked, and an uploaded URL is not tied to the
+  client who uploaded it. External https photo links are loaded by the pro's
+  browser.
 - **Exact job location** is visible on the radar before acceptance. Consider
   blurring it until a pro accepts.
 - **Straight-line ETA** at 30 km/h. Swap in a routing API for road ETAs.

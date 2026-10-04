@@ -20,6 +20,9 @@ const rooms = {
 module.exports = {
   setIo,
   rooms,
+  toRooms: (roomList, event, payload) => {
+    if (io) io.to(roomList).emit(event, payload);
+  },
   toUser: (userId, event, payload) => emit(rooms.user(userId), event, payload),
   toJob: (jobId, event, payload) => emit(rooms.job(jobId), event, payload),
   toPros: (serviceType, event, payload) => emit(rooms.pros(serviceType), event, payload),

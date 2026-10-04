@@ -1,4 +1,5 @@
 require('dotenv').config();
+const path = require('path');
 
 const nodeEnv = process.env.NODE_ENV || 'development';
 const isProduction = nodeEnv === 'production';
@@ -65,6 +66,9 @@ module.exports = {
   otpRequired,
   twilio,
   trustProxy,
+  // Uploaded problem photos. Use a persistent volume in production (or swap
+  // the local driver in services/storageService.js for object storage).
+  uploadDir: path.resolve(process.env.UPLOAD_DIR || path.join(__dirname, '..', 'uploads')),
   stripe: {
     secretKey: stripeSecretKey,
     webhookSecret: process.env.STRIPE_WEBHOOK_SECRET || '',

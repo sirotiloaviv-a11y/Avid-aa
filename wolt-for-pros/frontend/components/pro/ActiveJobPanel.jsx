@@ -2,12 +2,15 @@
 
 import { CheckCircle2, Hammer, Loader2, Navigation, Phone, Radio, Route, Undo2 } from 'lucide-react';
 import StatusBadge from '@/components/ui/StatusBadge';
+import PhotoGallery from '@/components/PhotoGallery';
+import ChatPanel from '@/components/chat/ChatPanel';
 import { RadarMap } from '@/components/map';
 import { formatDistance, haversineKm } from '@/lib/geo';
 import { formatILS, SERVICE_LABELS } from '@/lib/format';
 
 export default function ActiveJobPanel({
   job,
+  me,
   position,
   sharing,
   simulating,
@@ -33,6 +36,11 @@ export default function ActiveJobPanel({
           </div>
           <StatusBadge status={job.status} />
         </div>
+        {job.photos && job.photos.length > 0 && (
+          <div className="mb-3">
+            <PhotoGallery photos={job.photos} size="h-16 w-16" />
+          </div>
+        )}
         <RadarMap me={position} target={target} className="h-72" />
         <div className="mt-3 grid grid-cols-3 gap-2 text-center text-sm">
           <Stat label="Distance" value={formatDistance(distance)} />
@@ -84,6 +92,7 @@ export default function ActiveJobPanel({
           </button>
         )}
       </div>
+      {job.client && <ChatPanel job={job} me={me} otherName={job.client.name.split(' ')[0]} />}
     </div>
   );
 }

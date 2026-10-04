@@ -1,8 +1,21 @@
 {
   "extends": "next/core-web-vitals",
   "rules": {
-    "no-unused-vars": ["error", { "args": "after-used", "caughtErrors": "none" }],
+    "no-unused-vars": [
+      "error",
+      {
+        "args": "after-used",
+        "caughtErrors": "none"
+      }
+    ],
     "prefer-const": "error",
-    "eqeqeq": ["error", "always", { "null": "ignore" }]
+    "eqeqeq": [
+      "error",
+      "always",
+      {
+        "null": "ignore"
+      }
+    ],
+    "@next/next/no-img-element": "off"
   }
 }

@@ -6,9 +6,11 @@ const { ACTIVE_JOB_STATUSES } = require('../domain/constants');
 const { haversineKm, etaMinutes, isValidCoordinate } = require('../domain/geo');
 const realtime = require('../realtime');
 const locationStore = require('../services/locationStore');
+const messageService = require('../services/messageService');
 
 const LOCATION_MIN_INTERVAL_MS = 1000;
 const LOCATION_PERSIST_INTERVAL_MS = 15000;
+const MESSAGE_MIN_INTERVAL_MS = 300;
 
 function safeAck(ack, payload) {
   if (typeof ack === 'function') ack(payload);
@@ -51,6 +53,25 @@ function initSockets(httpServer) {
 
     let lastLocationAt = 0;
     let lastPersistAt = 0;
+    let lastMessageAt = 0;
+
+    // Chat: { jobId, body } -> ack { ok, message } or { ok: false, error, code }.
+    // The message itself reaches both parties as 'message:new'.
+    socket.on('send_message', async (msg, ack) => {
+      const now = Date.now();
+      if (now - lastMessageAt < MESSAGE_MIN_INTERVAL_MS) {
+        return safeAck(ack, { ok: false, code: 'RATE_LIMITED', error: 'You are sending messages too fast' });
+      }
+      lastMessageAt = now;
+      try {
+        const message = await messageService.sendMessage(user, msg && msg.jobId, msg && msg.body);
+        return safeAck(ack, { ok: true, message });
+      } catch (err) {
+        if (err && err.status && err.status < 500) return safeAck(ack, { ok: false, code: err.code, error: err.message });
+        console.error('[socket] send_message', err);
+        return safeAck(ack, { ok: false, code: 'INTERNAL', error: 'Could not send the message' });
+      }
+    });
 
     // Clients and tradespeople join a job's room to receive its live updates.
     socket.on('job:subscribe', async (msg, ack) => {

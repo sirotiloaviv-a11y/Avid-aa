@@ -16,6 +16,13 @@ app.use('/api/webhooks', require('./routes/webhooks'));
 
 app.use(express.json({ limit: '100kb' }));
 
+// Uploaded photos. Names are random, so listing is off and files are cached
+// for good; cross-origin so the web app on another origin can show them.
+app.use('/uploads', (req, res, next) => {
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  next();
+}, express.static(config.uploadDir, { index: false, dotfiles: 'deny', maxAge: '30d', immutable: true }));
+
 app.get('/api/health', (req, res) => res.json({ ok: true, stripeMockMode: config.stripe.mockMode }));
 app.use('/api', limits.api);
 app.use('/api/catalog', require('./routes/catalog'));
@@ -24,6 +31,7 @@ app.use('/api/wallet', require('./routes/wallet'));
 app.use('/api/pros', require('./routes/pros'));
 app.use('/api/jobs', require('./routes/jobs'));
 app.use('/api/admin', require('./routes/admin'));
+app.use('/api/uploads', require('./routes/uploads'));
 
 app.use(notFound);
 app.use(errorHandler);

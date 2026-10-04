@@ -4,8 +4,11 @@ const { prisma } = require('../db');
 const { asyncHandler, parse } = require('../middleware/errors');
 const { authenticate, requireRole } = require('../middleware/auth');
 const { limits } = require('../middleware/rateLimit');
-const { SERVICE_TYPES } = require('../domain/constants');
+const { SERVICE_TYPES, MAX_JOB_PHOTOS, MAX_MESSAGE_LENGTH } = require('../domain/constants');
+const { isAllowedPhotoUrl } = require('../domain/media');
 const jobService = require('../services/jobService');
+const reviewService = require('../services/reviewService');
+const messageService = require('../services/messageService');
 const { serializeJob } = require('../serializers');
 
 const router = express.Router();
@@ -20,6 +23,9 @@ const createSchema = z.object({
   latitude,
   longitude,
   address: z.string().trim().max(200).optional(),
+  photos: z.array(z.string().trim().refine(isAllowedPhotoUrl, 'Use an uploaded photo or an https image URL'))
+    .max(MAX_JOB_PHOTOS, `Up to ${MAX_JOB_PHOTOS} photos`)
+    .default([]),
 });
 
 router.post('/create', requireRole('client'), limits.createJob, asyncHandler(async (req, res) => {
@@ -72,6 +78,30 @@ router.post('/:id/verify-and-complete', requireRole('tradesperson'), limits.comp
     suspended: result.suspended,
     job: serializeJob(result.job, req.user),
   });
+}));
+
+router.post('/:id/review', requireRole('client'), asyncHandler(async (req, res) => {
+  const body = parse(z.object({
+    rating: z.coerce.number().int().min(1, 'Rate from 1 to 5 stars').max(5, 'Rate from 1 to 5 stars'),
+    comment: z.string().trim().max(1000).optional(),
+  }), req.body);
+  const { review, profile } = await reviewService.createReview(req.user, req.params.id, body);
+  res.status(201).json({
+    review: reviewService.serializeReview(review),
+    tradesperson: { rating: profile.rating, ratingCount: profile.ratingCount },
+  });
+}));
+
+router.get('/:id/messages', asyncHandler(async (req, res) => {
+  const messages = await messageService.listMessages(req.user, req.params.id);
+  res.json({ messages });
+}));
+
+// REST twin of the socket's send_message, for clients without a socket.
+router.post('/:id/messages', limits.message, asyncHandler(async (req, res) => {
+  const { body } = parse(z.object({ body: z.string().trim().min(1).max(MAX_MESSAGE_LENGTH) }), req.body);
+  const message = await messageService.sendMessage(req.user, req.params.id, body);
+  res.status(201).json({ message });
 }));
 
 router.post('/:id/cancel', asyncHandler(async (req, res) => {

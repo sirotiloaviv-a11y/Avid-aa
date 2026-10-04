@@ -9,6 +9,8 @@ import TopUpModal from '@/components/pro/TopUpModal';
 import JobCard from '@/components/pro/JobCard';
 import ExecutionModal from '@/components/pro/ExecutionModal';
 import ActiveJobPanel from '@/components/pro/ActiveJobPanel';
+import JobDetailsModal from '@/components/pro/JobDetailsModal';
+import { RatingBadge } from '@/components/ui/StarRating';
 import Spinner from '@/components/ui/Spinner';
 import { RadarMap } from '@/components/map';
 import { useToast } from '@/components/ui/Toast';
@@ -49,6 +51,7 @@ function ProDashboard() {
   const [jobs, setJobs] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
   const [acceptingId, setAcceptingId] = useState(null);
+  const [reviewingId, setReviewingId] = useState(null); // job open in the acceptance modal
   const [topUp, setTopUp] = useState({ open: false, suggested: null });
   const [executing, setExecuting] = useState(false);
   const [sharing, setSharing] = useState(false);
@@ -141,7 +144,17 @@ function ProDashboard() {
   }, [online, activeJobId, coarseKey, loadNearby]);
 
   useSocketEvent('job:new', () => online && !activeJob && loadNearby());
-  useSocketEvent('job:taken', ({ id }) => setJobs((list) => (list ? list.filter((j) => j.id !== id) : list)));
+  useSocketEvent('job:taken', ({ id }) => {
+    setJobs((list) => (list ? list.filter((j) => j.id !== id) : list));
+    if (id === reviewingId && id !== acceptingId) {
+      setReviewingId(null);
+      toast('Another pro took that job.', 'info');
+    }
+  });
+  useSocketEvent('review:new', ({ review, rating, ratingCount }) => {
+    setMe((m) => (m ? { ...m, profile: { ...m.profile, rating, ratingCount } } : m));
+    toast(`New ${review.rating}-star review${review.comment ? `: "${review.comment}"` : ''}`, 'success', 7000);
+  });
   useSocketEvent('wallet:updated', () => loadWallet());
   useSocketEvent('profile:updated', ({ status }) => {
     setMe((m) => (m ? { ...m, profile: { ...m.profile, status } } : m));
@@ -235,6 +248,7 @@ function ProDashboard() {
       const p = positionRef.current;
       await api(`/api/jobs/${job.id}/accept`, { method: 'POST', body: { latitude: p.lat, longitude: p.lng } });
       toast(`Job accepted. ${formatILS(job.feeAmount)} fee held from your wallet.`, 'success');
+      setReviewingId(null);
       setSharing(true);
       await Promise.all([loadMe(), loadWallet()]);
       emitLocation(p);
@@ -321,6 +335,7 @@ function ProDashboard() {
           <p className="text-sm text-slate-500">
             {SERVICE_LABELS[profile.serviceType]} · License {profile.licenseNumber}
           </p>
+          <RatingBadge rating={profile.rating} count={profile.ratingCount} className="mt-0.5" />
         </div>
         {!suspended && (
           <button
@@ -350,6 +365,7 @@ function ProDashboard() {
           {activeJob ? (
             <ActiveJobPanel
               job={activeJob}
+              me={user}
               position={position}
               sharing={sharing}
               simulating={demo ? isDriving(activeJob.id) : simulating}
@@ -388,7 +404,7 @@ function ProDashboard() {
                   accepting={acceptingId === job.id}
                   disabledReason={disabledReason}
                   onSelect={() => setSelectedId(job.id)}
-                  onAccept={() => accept(job)}
+                  onAccept={() => setReviewingId(job.id)}
                   onTopUp={() => setTopUp({ open: true, suggested: Math.max(0, job.feeAmount - (wallet ? wallet.balance : 0)) })}
                 />
               ))}
@@ -430,6 +446,22 @@ function ProDashboard() {
         presets={presets}
         onClose={() => setTopUp({ open: false, suggested: null })}
         onCredited={() => loadWallet()}
+      />
+      <JobDetailsModal
+        job={reviewingId ? (jobs || []).find((j) => j.id === reviewingId) : null}
+        available={wallet ? wallet.balance : 0}
+        disabledReason={disabledReason}
+        accepting={Boolean(acceptingId)}
+        onClose={() => setReviewingId(null)}
+        onAccept={() => {
+          const job = (jobs || []).find((j) => j.id === reviewingId);
+          if (job) accept(job);
+        }}
+        onTopUp={() => {
+          const job = (jobs || []).find((j) => j.id === reviewingId);
+          setReviewingId(null);
+          setTopUp({ open: true, suggested: job ? Math.max(0, job.feeAmount - (wallet ? wallet.balance : 0)) : null });
+        }}
       />
       <ExecutionModal open={executing} onClose={() => setExecuting(false)} job={activeJob} feeRate={feeRate} onSubmit={complete} />
     </div>

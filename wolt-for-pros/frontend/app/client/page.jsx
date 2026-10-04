@@ -7,6 +7,7 @@ import { ChevronRight, Crosshair, Loader2, Navigation, Send } from 'lucide-react
 import AppShell from '@/components/AppShell';
 import RoleGate from '@/components/RoleGate';
 import ServicePicker, { SERVICE_ICONS } from '@/components/client/ServicePicker';
+import PhotoPicker from '@/components/client/PhotoPicker';
 import StatusBadge from '@/components/ui/StatusBadge';
 import Spinner from '@/components/ui/Spinner';
 import { LocationPicker } from '@/components/map';
@@ -30,6 +31,8 @@ function ClientHome() {
   );
   const [locating, setLocating] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [photos, setPhotos] = useState([]);
+  const [uploading, setUploading] = useState(false);
   const [jobs, setJobs] = useState(null);
 
   const loadJobs = useCallback(() => {
@@ -57,7 +60,7 @@ function ClientHome() {
     try {
       const { job } = await api('/api/jobs/create', {
         method: 'POST',
-        body: { serviceType, description, address: address || undefined, latitude: location.lat, longitude: location.lng },
+        body: { serviceType, description, address: address || undefined, latitude: location.lat, longitude: location.lng, photos },
       });
       router.push(`/client/jobs/${job.id}`);
     } catch (err) {
@@ -121,6 +124,12 @@ function ClientHome() {
           </div>
 
           <div>
+            <span className="label">Photos of the problem (optional)</span>
+            <PhotoPicker value={photos} onChange={setPhotos} onBusyChange={setUploading} />
+            <p className="mt-1.5 text-xs text-slate-500">A photo helps the pro bring the right parts. Up to 5.</p>
+          </div>
+
+          <div>
             <label className="label" htmlFor="address">Address details (optional)</label>
             <input id="address" className="input" placeholder="Street, number, floor, apartment" value={address} onChange={(e) => setAddress(e.target.value)} maxLength={200} />
           </div>
@@ -135,7 +144,7 @@ function ClientHome() {
               </p>
               <p className="text-xs text-slate-500">Typical {selected.label.toLowerCase()} call-out. Final price agreed on site.</p>
             </div>
-            <button className="btn-primary shrink-0 px-5 py-3" disabled={submitting || !catalog}>
+            <button className="btn-primary shrink-0 px-5 py-3" disabled={submitting || uploading || !catalog} title={uploading ? 'Waiting for photos to upload' : undefined}>
               {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />} Request
             </button>
           </div>

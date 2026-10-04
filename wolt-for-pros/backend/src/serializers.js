@@ -20,6 +20,8 @@ function serializeProfile(profile) {
     serviceType: profile.serviceType,
     status: profile.status,
     fraudScore: profile.fraudScore,
+    rating: profile.rating ?? 0,
+    ratingCount: profile.ratingCount ?? 0,
   };
 }
 
@@ -77,6 +79,8 @@ function serializeJob(job, viewer) {
     completedAt: job.completedAt,
     cancelledAt: job.cancelledAt,
     createdAt: job.createdAt,
+    photos: Array.isArray(job.photos) ? job.photos.map((p) => p.url) : [],
+    review: job.review ? { rating: job.review.rating, comment: job.review.comment, createdAt: job.review.createdAt } : null,
   };
 
   if (isClient || isAdmin) out.completionCode = job.completionCode;
@@ -97,6 +101,8 @@ function serializeJob(job, viewer) {
     if (job.tradesperson.profile) {
       out.tradesperson.licenseNumber = job.tradesperson.profile.licenseNumber;
       out.tradesperson.serviceType = job.tradesperson.profile.serviceType;
+      out.tradesperson.rating = job.tradesperson.profile.rating ?? 0;
+      out.tradesperson.ratingCount = job.tradesperson.profile.ratingCount ?? 0;
       if (isAdmin) {
         out.tradesperson.status = job.tradesperson.profile.status;
         out.tradesperson.fraudScore = job.tradesperson.profile.fraudScore;

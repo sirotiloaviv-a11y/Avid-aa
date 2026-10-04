@@ -72,6 +72,41 @@ export async function api(path, { method = 'GET', body = undefined, query = unde
   return data;
 }
 
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new ApiError('Could not read the image', 0, 'READ_FAILED'));
+    reader.readAsDataURL(blob);
+  });
+}
+
+/**
+ * Uploads one image (already resized, see lib/images.js) and returns the URL
+ * to put in a job's `photos`. In demo mode the image stays in the browser as
+ * a data URL.
+ * @param {Blob} blob
+ * @returns {Promise<string>}
+ */
+export async function uploadImage(blob) {
+  if ((await resolveMode()) === 'demo') return blobToDataUrl(blob);
+  const headers = { 'Content-Type': blob.type || 'image/jpeg', Accept: 'application/json' };
+  const token = getToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+  let res;
+  try {
+    res = await fetch(`${API_URL}/api/uploads`, { method: 'POST', headers, body: blob });
+  } catch {
+    throw new ApiError(`Cannot reach the server at ${API_URL} to upload the photo.`, 0, 'NETWORK');
+  }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err = data.error || {};
+    throw new ApiError(err.message || 'Upload failed', res.status, err.code);
+  }
+  return data.url;
+}
+
 // Surface the first field-level validation message when there is one.
 function fieldMessage(err) {
   const fields = err && err.details && err.details.fieldErrors;

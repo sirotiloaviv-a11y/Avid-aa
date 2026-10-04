@@ -1,8 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, BadgeCheck, Clock, FlaskConical, Loader2, Navigation, Phone, Route, ShieldAlert, XCircle } from 'lucide-react';
+import { ArrowLeft, BadgeCheck, Clock, FlaskConical, Loader2, Navigation, Phone, Route, ShieldAlert, Star, XCircle } from 'lucide-react';
 import AppShell from '@/components/AppShell';
 import RoleGate from '@/components/RoleGate';
 import CompletionCode from '@/components/client/CompletionCode';
@@ -16,6 +16,11 @@ import { formatDateTime, formatILS, SERVICE_LABELS } from '@/lib/format';
 import { etaSeconds, formatDistance, haversineKm } from '@/lib/geo';
 import { useJobChannel, useSocketEvent } from '@/lib/socket';
 import { useDemo } from '@/lib/demo/DemoContext';
+import { useSession } from '@/lib/session';
+import ChatPanel from '@/components/chat/ChatPanel';
+import PhotoGallery from '@/components/PhotoGallery';
+import RatingModal from '@/components/client/RatingModal';
+import { RatingBadge } from '@/components/ui/StarRating';
 
 const LIVE_STATUSES = ['assigned', 'in_progress'];
 
@@ -41,6 +46,9 @@ function formatCountdown(seconds) {
 function JobTracking({ jobId }) {
   const toast = useToast();
   const { isDemo: demo, isDriving, toggleDrive } = useDemo();
+  const { user } = useSession();
+  const [ratingOpen, setRatingOpen] = useState(false);
+  const promptedRef = useRef(false);
   const driving = isDriving(jobId);
   const [job, setJob] = useState(null);
   const [error, setError] = useState(null);
@@ -92,6 +100,14 @@ function JobTracking({ jobId }) {
       applyLocation({ ...p, distanceKm: haversineKm(p, { lat: job.latitude, lng: job.longitude }) });
     }
   }, [job, pro, applyLocation]);
+
+  // Ask for a rating once, right after the job is completed.
+  useEffect(() => {
+    if (job && job.status === 'completed' && job.tradesperson && !job.review && !promptedRef.current) {
+      promptedRef.current = true;
+      setRatingOpen(true);
+    }
+  }, [job]);
 
   const countdown = useCountdown(job && job.status === 'assigned' ? etaTarget : null);
 
@@ -177,7 +193,9 @@ function JobTracking({ jobId }) {
                 <p className="flex items-center gap-1 font-semibold">
                   {job.tradesperson.name} <BadgeCheck className="h-4 w-4 text-brand-600" />
                 </p>
-                <p className="text-xs text-slate-500">License {job.tradesperson.licenseNumber}</p>
+                <p className="flex flex-wrap items-center gap-x-2 text-xs text-slate-500">
+                  <RatingBadge rating={job.tradesperson.rating} count={job.tradesperson.ratingCount} /> License {job.tradesperson.licenseNumber}
+                </p>
                 <p className="text-xs text-slate-500">
                   {job.status === 'in_progress' ? 'Working on your job' : (
                     <span className="inline-flex items-center gap-1"><Navigation className="h-3 w-3" /> On the way</span>
@@ -196,6 +214,30 @@ function JobTracking({ jobId }) {
         <div className="space-y-4">
           {live && job.completionCode && <CompletionCode code={job.completionCode} />}
 
+          {job.tradesperson && ['assigned', 'in_progress', 'completed'].includes(job.status) && (
+            <ChatPanel job={job} me={user} otherName={job.tradesperson.name.split(' ')[0]} />
+          )}
+
+          {job.status === 'completed' && job.tradesperson && (
+            <div className="card p-4">
+              {job.review ? (
+                <>
+                  <p className="text-sm font-semibold">Your review</p>
+                  <p className="mt-1 flex gap-0.5" aria-label={`${job.review.rating} out of 5 stars`}>
+                    {[1, 2, 3, 4, 5].map((n) => (
+                      <Star key={n} className={`h-5 w-5 ${n <= job.review.rating ? 'fill-amber-400 text-amber-400' : 'text-slate-300'}`} />
+                    ))}
+                  </p>
+                  {job.review.comment && <p className="mt-1 text-sm text-slate-600">{job.review.comment}</p>}
+                </>
+              ) : (
+                <button type="button" className="btn-primary w-full" onClick={() => setRatingOpen(true)}>
+                  <Star className="h-4 w-4" /> Rate {job.tradesperson.name.split(' ')[0]}
+                </button>
+              )}
+            </div>
+          )}
+
           {job.status === 'flagged' && (
             <div className="card flex gap-3 border-l-4 border-rose-500 p-4">
               <ShieldAlert className="h-5 w-5 shrink-0 text-rose-600" />
@@ -212,7 +254,20 @@ function JobTracking({ jobId }) {
             <Row label="Requested" value={formatDateTime(job.createdAt)} />
             {job.completedAt && <Row label="Completed" value={formatDateTime(job.completedAt)} />}
             <p className="border-t border-slate-100 pt-2 text-slate-600">{job.description}</p>
+            <PhotoGallery photos={job.photos || []} size="h-16 w-16" />
           </div>
+
+          {job.tradesperson && (
+            <RatingModal
+              open={ratingOpen}
+              onClose={() => setRatingOpen(false)}
+              job={job}
+              onRated={(review) => {
+                setRatingOpen(false);
+                setJob((j) => ({ ...j, review }));
+              }}
+            />
+          )}
 
           {['requested', 'assigned'].includes(job.status) && (
             <button type="button" className="btn-secondary w-full text-rose-600" onClick={cancel} disabled={cancelling}>

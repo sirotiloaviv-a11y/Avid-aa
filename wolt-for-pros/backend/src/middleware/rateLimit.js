@@ -106,6 +106,8 @@ const limits = {
   }),
   createJob: rateLimit({ name: 'create-job', windowMs: 60 * MINUTE, max: 10, key: (req) => req.user && req.user.id, message: 'You have opened too many requests this hour.' }),
   completeJob: rateLimit({ name: 'complete-job', windowMs: 10 * MINUTE, max: 10, key: (req) => req.user && req.user.id }),
+  upload: rateLimit({ name: 'upload', windowMs: 60 * MINUTE, max: 30, key: (req) => req.user && req.user.id, message: 'Too many uploads this hour.' }),
+  message: rateLimit({ name: 'message', windowMs: MINUTE, max: 30, key: (req) => req.user && req.user.id, message: 'You are sending messages too fast.' }),
 };
 
 module.exports = { rateLimit, MemoryStore, RedisStore, limits, defaultStore };

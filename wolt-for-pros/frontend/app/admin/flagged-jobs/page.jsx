@@ -11,6 +11,7 @@ import { useToast } from '@/components/ui/Toast';
 import { api } from '@/lib/api';
 import { formatDateTime, formatILS, SERVICE_LABELS } from '@/lib/format';
 import { useSocketEvent } from '@/lib/socket';
+import { RatingBadge } from '@/components/ui/StarRating';
 
 const TABS = [
   { key: 'open', label: 'Open disputes', icon: ShieldAlert },
@@ -224,6 +225,7 @@ function AdminConsole() {
                   <tr>
                     <th className="px-4 py-3">Tradesperson</th>
                     <th className="px-4 py-3">Status</th>
+                    <th className="px-4 py-3">Rating</th>
                     <th className="px-4 py-3">Flags (30d)</th>
                     <th className="px-4 py-3">Available</th>
                     <th className="px-4 py-3">Locked</th>
@@ -238,6 +240,7 @@ function AdminConsole() {
                         <p className="text-xs text-slate-500">{SERVICE_LABELS[p.profile?.serviceType]} · {p.phone} · score {p.profile?.fraudScore ?? 0}</p>
                       </td>
                       <td className="px-4 py-3"><span className={`badge ${PROFILE_BADGE[p.profile?.status] || ''}`}>{p.profile?.status}</span></td>
+                      <td className="px-4 py-3"><RatingBadge rating={p.profile?.rating} count={p.profile?.ratingCount} /></td>
                       <td className="px-4 py-3">{p.flagsInWindow}</td>
                       <td className={`px-4 py-3 tabular-nums ${p.wallet && p.wallet.balance < 0 ? 'text-rose-600' : ''}`}>{formatILS(p.wallet?.balance ?? 0)}</td>
                       <td className="px-4 py-3 tabular-nums">{formatILS(p.wallet?.lockedBalance ?? 0)}</td>

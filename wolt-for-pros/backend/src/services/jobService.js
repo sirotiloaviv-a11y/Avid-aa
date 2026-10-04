@@ -13,14 +13,20 @@ const locationStore = require('./locationStore');
 const realtime = require('../realtime');
 const { serializeJob } = require('../serializers');
 
+const photosInclude = { orderBy: { createdAt: 'asc' } };
+
 const jobInclude = {
   client: true,
   tradesperson: { include: { profile: true } },
+  photos: photosInclude,
+  review: true,
 };
 
 const adminJobInclude = {
   client: true,
   tradesperson: { include: { profile: true, wallet: true } },
+  photos: photosInclude,
+  review: true,
 };
 
 function feeFor(priceCents) {
@@ -58,23 +64,28 @@ async function getProfile(userId) {
   return profile;
 }
 
-async function createJob(clientUser, { serviceType, description, latitude, longitude, address = null }) {
+async function createJob(clientUser, { serviceType, description, latitude, longitude, address = null, photos = [] }) {
   const { estimate } = estimateFor(serviceType);
-  const job = await prisma.job.create({
-    data: {
-      clientId: clientUser.id,
-      serviceType,
-      description,
-      address: address || null,
-      latitude,
-      longitude,
-      estimatedPrice: fromCents(estimate * 100),
-      completionCode: generateCompletionCode(crypto.randomInt),
-      status: 'requested',
-    },
-    include: jobInclude,
+  const job = await prisma.$transaction(async (tx) => {
+    const created = await tx.job.create({
+      data: {
+        clientId: clientUser.id,
+        serviceType,
+        description,
+        address: address || null,
+        latitude,
+        longitude,
+        estimatedPrice: fromCents(estimate * 100),
+        completionCode: generateCompletionCode(crypto.randomInt),
+        status: 'requested',
+      },
+    });
+    for (const url of photos) {
+      await tx.jobPhoto.create({ data: { jobId: created.id, url } });
+    }
+    await tx.user.update({ where: { id: clientUser.id }, data: { latitude, longitude } });
+    return loadJob(tx, created.id);
   });
-  await prisma.user.update({ where: { id: clientUser.id }, data: { latitude, longitude } });
 
   const estimateCents = toCents(job.estimatedPrice);
   realtime.toPros(job.serviceType, 'job:new', {
@@ -109,7 +120,7 @@ async function nearbyJobs(proUser, { lat, lng, radiusKm = DEFAULT_RADAR_RADIUS_K
   const [jobs, wallet] = await Promise.all([
     prisma.job.findMany({
       where: { status: 'requested', serviceType: profile.serviceType },
-      include: { client: true },
+      include: { client: true, photos: photosInclude },
       orderBy: { createdAt: 'desc' },
       take: 200,
     }),

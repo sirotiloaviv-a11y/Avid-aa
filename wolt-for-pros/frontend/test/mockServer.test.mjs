@@ -108,3 +108,59 @@ test('unknown routes and bad tokens fail like the real API', async () => {
   const otp = await req('POST', '/api/auth/otp/request', null, { phone: CLIENT });
   assert.equal(otp.sent, true);
 });
+
+test('ratings: rate a completed job once; the average updates', async () => {
+  const pro = await login(PRO);
+  const client = await login(CLIENT);
+  await assert.rejects(req('POST', `/api/jobs/${DEMO_ACTIVE_JOB_ID}/review`, client, { rating: 5 }), { code: 'NOT_COMPLETED' });
+  await req('POST', `/api/jobs/${DEMO_ACTIVE_JOB_ID}/verify-and-complete`, pro, { completionCode: '4829', finalPrice: 400 });
+  const res = await req('POST', `/api/jobs/${DEMO_ACTIVE_JOB_ID}/review`, client, { rating: 5, comment: 'Fast and tidy' });
+  // seed 5,5,4 + 5 = 4.75
+  assert.deepEqual(res.tradesperson, { rating: 4.75, ratingCount: 4 });
+  await assert.rejects(req('POST', `/api/jobs/${DEMO_ACTIVE_JOB_ID}/review`, client, { rating: 1 }), { code: 'ALREADY_REVIEWED' });
+  const job = (await req('GET', `/api/jobs/${DEMO_ACTIVE_JOB_ID}`, client)).job;
+  assert.equal(job.review.rating, 5);
+  assert.equal(job.tradesperson.rating, 4.75);
+});
+
+test('chat: history, socket send_message, and closed after completion', async () => {
+  const client = await login(CLIENT);
+  const history = (await req('GET', `/api/jobs/${DEMO_ACTIVE_JOB_ID}/messages`, client)).messages;
+  assert.equal(history.length, 2);
+  assert.equal(history[0].senderRole, 'tradesperson');
+
+  const received = [];
+  const onMsg = (m) => received.push(m);
+  demoSocket.on('message:new', onMsg);
+  try {
+    const ack = await new Promise((resolve) => { demoSocket.emit('send_message', { jobId: DEMO_ACTIVE_JOB_ID, body: 'Door is open' }, resolve); });
+    assert.equal(ack.ok, true);
+    assert.equal(ack.message.senderRole, 'client');
+    const bad = await new Promise((resolve) => { demoSocket.emit('send_message', { jobId: DEMO_ACTIVE_JOB_ID, body: '   ' }, resolve); });
+    assert.deepEqual([bad.ok, bad.code], [false, 'EMPTY_MESSAGE']);
+    await new Promise((r) => { setTimeout(r, 2500); });
+    assert.ok(received.some((m) => m.senderRole === 'tradesperson'), 'demo pro replies');
+  } finally {
+    demoSocket.off('message:new', onMsg);
+  }
+
+  const pro = await login(PRO);
+  await req('POST', `/api/jobs/${DEMO_ACTIVE_JOB_ID}/verify-and-complete`, pro, { completionCode: '4829', finalPrice: 400 });
+  await assert.rejects(req('POST', `/api/jobs/${DEMO_ACTIVE_JOB_ID}/messages`, pro, { body: 'thanks' }), { code: 'CHAT_CLOSED' });
+});
+
+test('photos: attached on create and shown on the pro radar', async () => {
+  const client = await login(CLIENT);
+  const photo = 'https://images.example.com/breaker.jpg';
+  const { job } = await req('POST', '/api/jobs/create', client, { serviceType: 'electrician', description: 'Breaker sparks', latitude: 32.08, longitude: 34.78, photos: [photo] });
+  assert.deepEqual(job.photos, [photo]);
+  await assert.rejects(
+    req('POST', '/api/jobs/create', client, { serviceType: 'electrician', description: 'Bad link', latitude: 32.08, longitude: 34.78, photos: ['javascript:alert(1)'] }),
+    { code: 'VALIDATION_ERROR' },
+  );
+  const pro = await login(PRO);
+  await req('POST', `/api/jobs/${DEMO_ACTIVE_JOB_ID}/verify-and-complete`, pro, { completionCode: '4829', finalPrice: 400 });
+  const radar = (await req('GET', '/api/jobs/nearby', pro, undefined, { lat: 32.08, lng: 34.78 })).jobs;
+  assert.deepEqual(radar.find((j) => j.id === job.id).photos, [photo]);
+  assert.ok(radar.some((j) => j.photos.length && j.photos[0].startsWith('data:image/svg+xml')), 'seeded drawings');
+});
