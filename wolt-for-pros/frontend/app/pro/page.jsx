@@ -17,6 +17,7 @@ import { formatDateTime, formatILS, SERVICE_LABELS } from '@/lib/format';
 import { DEFAULT_CENTER, getBrowserPosition } from '@/lib/geo';
 import { useSession } from '@/lib/session';
 import { getSocket, useSocketEvent } from '@/lib/socket';
+import { isDemoDriving, toggleDemoDrive } from '@/lib/demo/mockServer';
 
 const RADAR_RADIUS_KM = 25;
 const SIM_STEP_MS = 1500;
@@ -36,7 +37,8 @@ function emitLocation(pos) {
 }
 
 function ProDashboard() {
-  const { user } = useSession();
+  const { user, mode } = useSession();
+  const demo = mode === 'demo';
   const toast = useToast();
   const [me, setMe] = useState(null);
   const [catalog, setCatalog] = useState(null);
@@ -52,17 +54,25 @@ function ProDashboard() {
   const [sharing, setSharing] = useState(false);
   const [simulating, setSimulating] = useState(false);
   const [busyAction, setBusyAction] = useState(null);
+  const [quickBusy, setQuickBusy] = useState(false);
 
   const positionRef = useRef(position);
   positionRef.current = position;
 
   const loadMe = useCallback(async () => {
     try {
-      setMe(await api('/api/pros/me'));
+      const data = await api('/api/pros/me');
+      setMe(data);
+      if (demo) {
+        // The mock is the source of truth for the pro's position and for a
+        // drive simulation that may have started from another view.
+        if (data.user.latitude != null) setPosition({ lat: data.user.latitude, lng: data.user.longitude });
+        setSimulating(Boolean(data.activeJob && isDemoDriving(data.activeJob.id)));
+      }
     } catch (err) {
       toast(err.message, 'error');
     }
-  }, [toast]);
+  }, [toast, demo]);
 
   const loadWallet = useCallback(async () => {
     try {
@@ -89,7 +99,8 @@ function ProDashboard() {
     loadMe();
     loadWallet();
     api('/api/catalog').then(setCatalog).catch(() => {});
-    getBrowserPosition().then((pos) => {
+    // In demo mode the seeded position is kept so the map shows Tel Aviv.
+    if (!demo) getBrowserPosition().then((pos) => {
       if (pos) {
         setPosition(pos);
         emitLocation(pos);
@@ -110,7 +121,7 @@ function ProDashboard() {
         })
         .catch((err) => toast(err.message, 'error'));
     }
-  }, [loadMe, loadWallet, toast]);
+  }, [loadMe, loadWallet, toast, demo]);
 
   const profile = me && me.profile;
   const wallet = me && me.wallet;
@@ -138,6 +149,16 @@ function ProDashboard() {
     if (status === 'suspended') toast('Your account has been suspended pending review.', 'error');
     if (status === 'active') toast('Your account is active again.', 'success');
   });
+  // Demo: the mock drives the pro and reports each step.
+  useSocketEvent('pro:location', (loc) => {
+    if (demo && activeJobId && loc.jobId === activeJobId) setPosition({ lat: loc.lat, lng: loc.lng });
+  });
+  useSocketEvent('demo:drive', ({ jobId, active, arrived }) => {
+    if (jobId !== activeJobId) return;
+    setSimulating(active);
+    if (arrived) toast('You have arrived at the client.', 'success');
+  });
+
   useSocketEvent('job:updated', (job) => {
     if (activeJob && job.id === activeJob.id) {
       if (job.status === 'cancelled') toast('The client cancelled the job. Your fee was released.', 'info');
@@ -155,7 +176,7 @@ function ProDashboard() {
         emitLocation(p);
       },
       () => {
-        toast('Location permission denied. Use "Simulate drive" to demo tracking.', 'error');
+        toast('Location permission denied. Use "Simulate driver movement" to demo tracking.', 'error');
         setSharing(false);
       },
       { enableHighAccuracy: true, maximumAge: 5000 },
@@ -166,7 +187,7 @@ function ProDashboard() {
   // Demo mode: drive in a straight line to the client.
   useEffect(() => {
     const job = activeJobRef.current;
-    if (!activeJobId || !job || !simulating) return undefined;
+    if (demo || !activeJobId || !job || !simulating) return undefined;
     const start = positionRef.current;
     const end = { lat: job.latitude, lng: job.longitude };
     let step = 0;
@@ -184,7 +205,25 @@ function ProDashboard() {
       }
     }, SIM_STEP_MS);
     return () => clearInterval(timer);
-  }, [activeJobId, simulating, toast]);
+  }, [activeJobId, simulating, toast, demo]);
+
+  async function quickTopUp(amount) {
+    setQuickBusy(true);
+    try {
+      const session = await api('/api/wallet/checkout-session', { method: 'POST', body: { amount } });
+      if (session.url) {
+        window.location.assign(session.url);
+        return;
+      }
+      await api('/api/wallet/deposit', { method: 'POST', body: { amount } });
+      await loadWallet();
+      toast(`${formatILS(amount)} added to your wallet`, 'success');
+    } catch (err) {
+      toast(err.message, 'error');
+    } finally {
+      setQuickBusy(false);
+    }
+  }
 
   async function setOnline(next) {
     try {
@@ -322,7 +361,7 @@ function ProDashboard() {
               simulating={simulating}
               busyAction={busyAction}
               onToggleSharing={() => setSharing((s) => !s)}
-              onToggleSimulate={() => setSimulating((s) => !s)}
+              onToggleSimulate={() => (demo ? toggleDemoDrive(activeJob.id) : setSimulating((s) => !s))}
               onStart={startJob}
               onFinish={() => setExecuting(true)}
               onRelease={releaseJob}
@@ -364,7 +403,13 @@ function ProDashboard() {
         </div>
 
         <aside className="order-1 space-y-4 lg:order-2">
-          <WalletCard wallet={wallet} feeRate={feeRate} onTopUp={() => setTopUp({ open: true, suggested: null })} />
+          <WalletCard
+            wallet={wallet}
+            feeRate={feeRate}
+            onTopUp={() => setTopUp({ open: true, suggested: null })}
+            onQuickTopUp={() => quickTopUp(100)}
+            quickBusy={quickBusy}
+          />
           <div className="card p-4">
             <h3 className="mb-2 flex items-center gap-2 text-sm font-bold"><History className="h-4 w-4" /> Wallet activity</h3>
             {transactions.length === 0 && <p className="text-sm text-slate-500">No activity yet.</p>}

@@ -3,6 +3,8 @@
 import { useEffect, useRef } from 'react';
 import { io } from 'socket.io-client';
 import { API_URL, getToken } from './api';
+import { isDemoMode } from './demo/mode';
+import { demoSocket } from './demo/mockServer';
 
 let socket = null;
 let socketToken = null;
@@ -10,6 +12,7 @@ let socketToken = null;
 export function getSocket() {
   const token = getToken();
   if (!token) return null;
+  if (isDemoMode()) return demoSocket;
   if (socket && socketToken === token) return socket;
   if (socket) socket.disconnect();
   socket = io(API_URL, { auth: { token }, transports: ['websocket', 'polling'] });

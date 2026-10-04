@@ -20,7 +20,7 @@ const TABS = [
 
 const RESOLUTION_LABELS = {
   approved: 'Approved: fee on final price',
-  charged_estimate: 'Upheld: fee on estimate',
+  charged_estimate: 'Rejected: fee on estimate',
   voided: 'Voided: fee released',
 };
 
@@ -182,7 +182,7 @@ function AdminConsole() {
                       />
                       <div className="grid grid-cols-3 gap-2">
                         <ActionButton busy={busy === `${job.id}:approve`} onClick={() => resolve(job, 'approve')} className="btn-success" icon={CheckCircle2} label="Approve" hint="Fee on final price" />
-                        <ActionButton busy={busy === `${job.id}:charge_estimate`} onClick={() => resolve(job, 'charge_estimate')} className="btn-danger" icon={Gavel} label="Uphold" hint="Fee on estimate" />
+                        <ActionButton busy={busy === `${job.id}:charge_estimate`} onClick={() => resolve(job, 'charge_estimate')} className="btn-danger" icon={Gavel} label="Reject" hint="Fee on estimate" />
                         <ActionButton busy={busy === `${job.id}:void`} onClick={() => resolve(job, 'void')} className="btn-secondary" icon={XCircle} label="Void" hint="Release fee" />
                       </div>
                       <div className="flex gap-2">

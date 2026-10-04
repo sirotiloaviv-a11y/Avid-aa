@@ -63,7 +63,7 @@ export default function ActiveJobPanel({
           </button>
           {job.status === 'assigned' && (
             <button type="button" onClick={onToggleSimulate} className={`btn flex-1 ${simulating ? 'bg-brand-50 text-brand-700 ring-1 ring-brand-200' : 'btn-secondary'}`}>
-              <Route className="h-4 w-4" /> {simulating ? 'Stop simulation' : 'Simulate drive'}
+              <Route className="h-4 w-4" /> {simulating ? 'Stop driver movement' : 'Simulate driver movement'}
             </button>
           )}
         </div>

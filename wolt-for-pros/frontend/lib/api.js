@@ -1,4 +1,9 @@
-export const API_URL = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000').replace(/\/$/, '');
+import { API_URL } from './config';
+import { ApiError } from './errors';
+import { resolveMode } from './demo/mode';
+import { mockRequest } from './demo/mockServer';
+
+export { API_URL, ApiError };
 
 const TOKEN_KEY = 'wfp_token';
 
@@ -19,16 +24,11 @@ export function setToken(token) {
   }
 }
 
-export class ApiError extends Error {
-  constructor(message, status, code, details) {
-    super(message);
-    this.status = status;
-    this.code = code;
-    this.details = details;
-  }
-}
-
 export async function api(path, { method = 'GET', body, query } = {}) {
+  if ((await resolveMode()) === 'demo') {
+    return mockRequest({ method, path, body, query, token: getToken() });
+  }
+
   const headers = { Accept: 'application/json' };
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   const token = getToken();

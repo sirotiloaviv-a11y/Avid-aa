@@ -11,6 +11,49 @@ wolt-for-pros/
 └── frontend/   Next.js 14 App Router + Tailwind + Leaflet
 ```
 
+## Instant preview: demo mode (no backend, no database)
+
+```bash
+cd frontend
+npm install
+npm run dev     # http://localhost:3000
+```
+
+If the API isn't reachable, the frontend switches to **demo mode**. It runs
+against an in-browser mock of the API and Socket.io server
+(`frontend/lib/demo/mockServer.js`) that applies the same rules as the backend:
+fee holds, settlement, fraud flags, admin rulings and the wallet ledger. Every
+page and workflow works unchanged. State is kept in `localStorage`.
+
+A floating toolbar at the bottom switches between the **Client view**, the
+**Tradesperson dashboard** and the **Admin panel**, and **resets the demo
+data**. Opening `/client`, `/pro` or `/admin` directly signs you in as that
+role's demo account.
+
+Seeded scenario to try:
+
+1. **Tradesperson dashboard.** Yossi Cohen (electrician, active) has ₪350
+   available and ₪50 locked, and is assigned "Power Outlet Replacement"
+   (₪400 estimate, ₪60 fee). Press **Top Up ₪100** to watch the balance count
+   up. Press **Simulate driver movement** to drive him to the client.
+2. **Client view.** Dana sees the same job live: the map, the ETA countdown,
+   and completion code **4829**. The drive keeps running when you switch views,
+   and the client view has its own **Simulate Driver Movement** button.
+3. **Back on the dashboard.** Press **Finish job** and enter `4829` with the
+   ₪400 price. The job closes, the ₪60 fee is settled and the ledger updates.
+   Enter a price under ₪200 instead to trigger the anti-fraud flag.
+4. **Admin panel.** A dispute is pre-loaded: "Unusual low price ₪150 vs ₪400
+   estimate". **Approve** charges the fee on ₪150. **Reject** charges it on the
+   ₪400 estimate. **Void** releases the fee.
+
+Force a mode with `NEXT_PUBLIC_DEMO_MODE=true|false`, or add `?demo=1` to the
+URL to stay in demo mode for that browser tab even while a backend is running.
+
+Note on the seed: the ₪50 locked balance is less than the job's ₪60 fee, as
+specified. The mock releases what is actually locked and takes the remaining
+₪10 from the available balance. Completing the job at ₪400 leaves ₪340
+available and ₪0 locked, and the ledger still balances.
+
 ## Quick start (local, SQLite, no Stripe account needed)
 
 ```bash

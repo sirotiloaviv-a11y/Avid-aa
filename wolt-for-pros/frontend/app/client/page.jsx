@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ChevronRight, Crosshair, Loader2, Send } from 'lucide-react';
+import { ChevronRight, Crosshair, Loader2, Navigation, Send } from 'lucide-react';
 import AppShell from '@/components/AppShell';
 import RoleGate from '@/components/RoleGate';
 import ServicePicker, { SERVICE_ICONS } from '@/components/client/ServicePicker';
@@ -73,6 +73,20 @@ function ClientHome() {
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
       <form onSubmit={submit} className="space-y-5">
+        {activeJobs.filter((j) => j.status !== 'requested').map((job) => (
+          <Link key={job.id} href={`/client/jobs/${job.id}`} className="flex items-center gap-3 rounded-2xl bg-brand-600 p-4 text-white shadow-card hover:bg-brand-700">
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white/15">
+              <Navigation className="h-5 w-5" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="font-bold">{job.tradesperson ? `${job.tradesperson.name} is ${job.status === 'in_progress' ? 'working on your job' : 'on the way'}` : 'Your pro is on the way'}</p>
+              <p className="truncate text-sm text-brand-100">{job.description}</p>
+            </div>
+            <span className="shrink-0 text-sm font-semibold">Track live</span>
+            <ChevronRight className="h-5 w-5 shrink-0" />
+          </Link>
+        ))}
+
         <div>
           <h1 className="text-2xl font-extrabold tracking-tight">Hi {user.name.split(' ')[0]}, what needs fixing?</h1>
           <p className="text-sm text-slate-500">A licensed pro near you gets the request instantly.</p>
