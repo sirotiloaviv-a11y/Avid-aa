@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Shadow AI Shield</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header>
+      <div class="brand">
+        <svg class="logo" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 2 4 5v6c0 5 3.4 9.7 8 11 4.6-1.3 8-6 8-11V5l-8-3Z" />
+          <path class="check" d="m8.5 12 2.5 2.5 4.5-5" />
+        </svg>
+        <div>
+          <h1>Shadow AI Shield</h1>
+          <p id="status-text" class="sub">Protection active</p>
+        </div>
+      </div>
+      <label class="switch" title="Toggle protection">
+        <input id="toggle" type="checkbox" role="switch" aria-label="Protection on/off" checked />
+        <span class="slider"></span>
+      </label>
+    </header>
+
+    <section class="card counter">
+      <span id="count" class="count">0</span>
+      <span class="label">PII Masked Today</span>
+      <div id="by-type" class="chips"></div>
+    </section>
+
+    <section class="card log">
+      <div class="log-head">
+        <h2>Recent activity</h2>
+        <button id="clear" type="button">Clear</button>
+      </div>
+      <ul id="log-list"></ul>
+      <p id="empty" class="empty">Nothing masked yet. Sensitive data you type into ChatGPT, Claude or Gemini will show up here.</p>
+    </section>
+
+    <footer>Only data types are logged — never the values.</footer>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

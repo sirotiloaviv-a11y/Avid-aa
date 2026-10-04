@@ -1,0 +1,34 @@
+{
+  "manifest_version": 3,
+  "name": "Shadow AI Shield",
+  "version": "0.1.0",
+  "description": "Masks personal and sensitive data before it is sent to AI chat assistants.",
+  "permissions": ["activeTab", "storage"],
+  "host_permissions": [
+    "https://chatgpt.com/*",
+    "https://chat.openai.com/*",
+    "https://claude.ai/*",
+    "https://gemini.google.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://chatgpt.com/*",
+        "https://chat.openai.com/*",
+        "https://claude.ai/*",
+        "https://gemini.google.com/*"
+      ],
+      "js": ["pii.js", "content.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "action": {
+    "default_title": "Shadow AI Shield",
+    "default_popup": "popup/popup.html"
+  }
+}

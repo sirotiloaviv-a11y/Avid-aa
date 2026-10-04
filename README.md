@@ -1,6 +1,6 @@
 # Avid-aa
 
-Two independent security projects.
+Independent security projects.
 
 ## [`moat/`](moat/README.md) — security scanner for AI agent configuration
 
@@ -21,3 +21,10 @@ No dependencies. Emits SARIF for GitHub code scanning.
 Monitors Hebrew-language news and Telegram sources for security events, matches
 them against a keyword ruleset that handles Hebrew prefixes, suffixes and
 niqqud, and dispatches alerts.
+
+## [`shadow-ai-shield/`](shadow-ai-shield/README.md) — Chrome extension that masks PII sent to AI chats
+
+Manifest V3 extension for ChatGPT, Claude and Gemini. Replaces emails, card
+numbers, phone numbers, national IDs and API keys in the prompt box with
+placeholders before the prompt is sent. Load it unpacked from
+`chrome://extensions`; no build step.
