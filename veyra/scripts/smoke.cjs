@@ -12,7 +12,7 @@ const base = process.argv[2] ?? 'http://127.0.0.1:4000';
 const shots = 'screenshots';
 
 const scoreOf = async (page) => {
-  const label = await page.locator('[aria-label^="Security score"]').getAttribute('aria-label');
+  const label = await page.locator('svg[role="img"][aria-label^="Security score"]').getAttribute('aria-label');
   return Number(label.match(/Security score (\d+)/)[1]);
 };
 
