@@ -2,7 +2,7 @@ import { Lock, MapPin, Clock, CheckCircle2, Loader2 } from 'lucide-react';
 import { formatDistance } from '@/lib/geo';
 import { formatILS, timeAgo } from '@/lib/format';
 
-export default function JobCard({ job, selected, available, accepting, disabledReason, onSelect, onAccept, onTopUp }) {
+export default function JobCard({ job, selected = false, available = 0, accepting = false, disabledReason = null, onSelect, onAccept, onTopUp }) {
   const canAfford = available >= job.feeAmount;
   const blocked = Boolean(disabledReason);
   return (

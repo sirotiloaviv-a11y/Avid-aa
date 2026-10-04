@@ -34,7 +34,7 @@ async function listFlaggedJobs({ state }) {
 // - approve:          the low price was legitimate; charge the fee on the final price
 // - charge_estimate:  treat it as a side deal; charge the fee on the estimate
 // - void:             the job did not really happen; release the hold, cancel the job
-async function resolveFlaggedJob(adminUser, { jobId, action, note }) {
+async function resolveFlaggedJob(adminUser, { jobId, action, note = null }) {
   const current = await jobService.loadJob(prisma, jobId, null);
   if (current.status !== 'flagged') {
     throw new HttpError(409, `Job is ${current.status}, not flagged`, 'INVALID_STATUS');

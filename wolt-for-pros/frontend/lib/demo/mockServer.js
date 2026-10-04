@@ -6,7 +6,7 @@
 // every page runs unchanged. State lives in localStorage so it survives
 // reloads; resetDemo() restores the seed.
 
-import { ApiError } from '../errors';
+import { ApiError } from '../errors.js';
 
 const STORAGE_KEY = 'wfp_demo_state_v1';
 const FEE_RATE = 0.15;
@@ -488,6 +488,7 @@ function authResponse(user) {
   return { token: `demo:${user.id}`, user: publicUser(user), profile: serializeProfile(user.id) };
 }
 
+/** @type {Array<[string, RegExp, (ctx: any) => any, { auth?: boolean }?]>} */
 const routes = [
   ['GET', /^\/api\/health$/, () => ({ ok: true, demo: true })],
   ['GET', /^\/api\/catalog$/, () => ({
@@ -495,7 +496,9 @@ const routes = [
     feeRate: FEE_RATE,
     services: CATALOG,
     topUp: { presets: [100, 200, 500], min: 20, max: 5000, mockMode: true },
+    auth: { otpRequired: false },
   })],
+  ['POST', /^\/api\/auth\/otp\/request$/, () => ({ sent: true, devCode: '000000' })],
 
   ['POST', /^\/api\/auth\/login$/, ({ body }) => {
     const user = db().users.find((u) => u.phone === String(body.phone || '').trim());
@@ -795,7 +798,9 @@ const routes = [
 ];
 
 export async function mockRequest({ method, path, body, query, token }) {
-  await new Promise((r) => setTimeout(r, RESPONSE_DELAY_MS));
+  await new Promise((r) => {
+    setTimeout(r, RESPONSE_DELAY_MS);
+  });
   const cleanPath = path.split('?')[0];
   for (const [m, pattern, handler, opts] of routes) {
     if (m !== method) continue;

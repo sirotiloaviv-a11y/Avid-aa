@@ -3,6 +3,7 @@ const { z } = require('zod');
 const { prisma } = require('../db');
 const { asyncHandler, parse } = require('../middleware/errors');
 const { authenticate, requireRole } = require('../middleware/auth');
+const { limits } = require('../middleware/rateLimit');
 const { SERVICE_TYPES } = require('../domain/constants');
 const jobService = require('../services/jobService');
 const { serializeJob } = require('../serializers');
@@ -21,7 +22,7 @@ const createSchema = z.object({
   address: z.string().trim().max(200).optional(),
 });
 
-router.post('/create', requireRole('client'), asyncHandler(async (req, res) => {
+router.post('/create', requireRole('client'), limits.createJob, asyncHandler(async (req, res) => {
   const body = parse(createSchema, req.body);
   const job = await jobService.createJob(req.user, body);
   res.status(201).json({ job: serializeJob(job, req.user) });
@@ -60,7 +61,7 @@ router.post('/:id/start', requireRole('tradesperson'), asyncHandler(async (req, 
   res.json({ job: serializeJob(job, req.user) });
 }));
 
-router.post('/:id/verify-and-complete', requireRole('tradesperson'), asyncHandler(async (req, res) => {
+router.post('/:id/verify-and-complete', requireRole('tradesperson'), limits.completeJob, asyncHandler(async (req, res) => {
   const body = parse(z.object({
     completionCode: z.string().trim().regex(/^\d{4}$/, 'The code is 4 digits'),
     finalPrice: z.coerce.number().positive().max(100000),

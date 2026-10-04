@@ -16,8 +16,8 @@ import { api } from '@/lib/api';
 import { formatDateTime, formatILS, SERVICE_LABELS } from '@/lib/format';
 import { DEFAULT_CENTER, getBrowserPosition } from '@/lib/geo';
 import { useSession } from '@/lib/session';
+import { useDemo } from '@/lib/demo/DemoContext';
 import { getSocket, useSocketEvent } from '@/lib/socket';
-import { isDemoDriving, toggleDemoDrive } from '@/lib/demo/mockServer';
 
 const RADAR_RADIUS_KM = 25;
 const SIM_STEP_MS = 1500;
@@ -37,8 +37,8 @@ function emitLocation(pos) {
 }
 
 function ProDashboard() {
-  const { user, mode } = useSession();
-  const demo = mode === 'demo';
+  const { user } = useSession();
+  const { isDemo: demo, isDriving, toggleDrive } = useDemo();
   const toast = useToast();
   const [me, setMe] = useState(null);
   const [catalog, setCatalog] = useState(null);
@@ -67,7 +67,6 @@ function ProDashboard() {
         // The mock is the source of truth for the pro's position and for a
         // drive simulation that may have started from another view.
         if (data.user.latitude != null) setPosition({ lat: data.user.latitude, lng: data.user.longitude });
-        setSimulating(Boolean(data.activeJob && isDemoDriving(data.activeJob.id)));
       }
     } catch (err) {
       toast(err.message, 'error');
@@ -152,11 +151,6 @@ function ProDashboard() {
   // Demo: the mock drives the pro and reports each step.
   useSocketEvent('pro:location', (loc) => {
     if (demo && activeJobId && loc.jobId === activeJobId) setPosition({ lat: loc.lat, lng: loc.lng });
-  });
-  useSocketEvent('demo:drive', ({ jobId, active, arrived }) => {
-    if (jobId !== activeJobId) return;
-    setSimulating(active);
-    if (arrived) toast('You have arrived at the client.', 'success');
   });
 
   useSocketEvent('job:updated', (job) => {
@@ -358,10 +352,10 @@ function ProDashboard() {
               job={activeJob}
               position={position}
               sharing={sharing}
-              simulating={simulating}
+              simulating={demo ? isDriving(activeJob.id) : simulating}
               busyAction={busyAction}
               onToggleSharing={() => setSharing((s) => !s)}
-              onToggleSimulate={() => (demo ? toggleDemoDrive(activeJob.id) : setSimulating((s) => !s))}
+              onToggleSimulate={() => (demo ? toggleDrive(activeJob.id) : setSimulating((s) => !s))}
               onStart={startJob}
               onFinish={() => setExecuting(true)}
               onRelease={releaseJob}

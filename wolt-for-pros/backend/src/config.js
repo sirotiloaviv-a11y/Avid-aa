@@ -30,6 +30,28 @@ if (isProduction && allowDirectDeposit) {
   throw new Error('Direct wallet deposits must be disabled in production: set STRIPE_SECRET_KEY and ALLOW_DIRECT_DEPOSIT=false');
 }
 
+const twilio = {
+  accountSid: process.env.TWILIO_ACCOUNT_SID || '',
+  authToken: process.env.TWILIO_AUTH_TOKEN || '',
+  verifyServiceSid: process.env.TWILIO_VERIFY_SERVICE_SID || '',
+};
+twilio.enabled = Boolean(twilio.accountSid && twilio.authToken && twilio.verifyServiceSid);
+
+// SMS one-time codes on login and sign-up. Phone-only login lets anyone who
+// knows a number sign in as its owner, so production refuses to start
+// without OTP unless that risk is accepted explicitly.
+const otpRequired = process.env.OTP_REQUIRED === 'true';
+if (isProduction && !otpRequired && process.env.ALLOW_PHONE_ONLY_LOGIN !== 'true') {
+  throw new Error('Set OTP_REQUIRED=true (with Twilio Verify credentials) in production, or ALLOW_PHONE_ONLY_LOGIN=true to accept the risk');
+}
+if (isProduction && otpRequired && !twilio.enabled) {
+  throw new Error('OTP_REQUIRED=true in production needs TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN and TWILIO_VERIFY_SERVICE_SID');
+}
+
+// Number of reverse proxies in front of the API (load balancer, ingress), so
+// req.ip, and with it rate limiting, sees the real client address.
+const trustProxy = numberFromEnv('TRUST_PROXY', 0);
+
 module.exports = {
   nodeEnv,
   isProduction,
@@ -40,6 +62,9 @@ module.exports = {
   platformFeeRate,
   currency: 'ils',
   allowDirectDeposit,
+  otpRequired,
+  twilio,
+  trustProxy,
   stripe: {
     secretKey: stripeSecretKey,
     webhookSecret: process.env.STRIPE_WEBHOOK_SECRET || '',

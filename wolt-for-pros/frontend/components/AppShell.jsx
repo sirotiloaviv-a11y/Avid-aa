@@ -7,13 +7,13 @@ import { useSession } from '@/lib/session';
 
 const ROLE_LABEL = { client: 'Client', tradesperson: 'Pro', admin: 'Admin' };
 
-export default function AppShell({ children, actions }) {
+export default function AppShell({ children = null, actions = null }) {
   const { user, logout } = useSession();
   const router = useRouter();
 
   return (
     <div className="min-h-screen pb-10">
-      <header className="sticky top-0 z-[500] border-b border-slate-200 bg-white/90 backdrop-blur">
+      <header className="sticky top-[var(--demo-bar-h,0px)] z-[500] border-b border-slate-200 bg-white/90 backdrop-blur">
         <div className="mx-auto flex h-14 max-w-5xl items-center justify-between gap-3 px-4">
           <Link href="/" className="flex items-center gap-2 font-extrabold tracking-tight">
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-600 text-white">

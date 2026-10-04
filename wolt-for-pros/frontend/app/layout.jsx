@@ -1,7 +1,8 @@
 import 'leaflet/dist/leaflet.css';
 import './globals.css';
-import { SessionProvider } from '@/lib/session';
 import { ToastProvider } from '@/components/ui/Toast';
+import { DemoProvider } from '@/lib/demo/DemoContext';
+import { SessionProvider } from '@/lib/session';
 import DemoRemount from '@/components/demo/DemoRemount';
 import DemoToolbar from '@/components/demo/DemoToolbar';
 
@@ -16,15 +17,17 @@ export const viewport = {
   themeColor: '#1372f5',
 };
 
-export default function RootLayout({ children }) {
+export default function RootLayout({ children = null }) {
   return (
     <html lang="en">
       <body className="min-h-screen">
         <ToastProvider>
-          <SessionProvider>
-            <DemoRemount>{children}</DemoRemount>
-            <DemoToolbar />
-          </SessionProvider>
+          <DemoProvider>
+            <SessionProvider>
+              <DemoToolbar />
+              <DemoRemount>{children}</DemoRemount>
+            </SessionProvider>
+          </DemoProvider>
         </ToastProvider>
       </body>
     </html>

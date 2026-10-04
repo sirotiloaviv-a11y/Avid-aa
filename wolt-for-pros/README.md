@@ -25,10 +25,16 @@ against an in-browser mock of the API and Socket.io server
 fee holds, settlement, fraud flags, admin rulings and the wallet ledger. Every
 page and workflow works unchanged. State is kept in `localStorage`.
 
-A floating toolbar at the bottom switches between the **Client view**, the
-**Tradesperson dashboard** and the **Admin panel**, and **resets the demo
-data**. Opening `/client`, `/pro` or `/admin` directly signs you in as that
-role's demo account.
+The switch happens at startup (the `/api/health` probe) and also mid-session:
+if a request to a live backend fails at the network level, the app moves to
+demo mode and tells you. `DemoContext` (`frontend/lib/demo/DemoContext.jsx`)
+holds the mode, the driver simulations and the reset, and remounts pages when
+any of them change.
+
+A toolbar pinned to the top switches between the **Client View**, the
+**Tradesperson Dashboard** and the **Admin Dispute Panel**, and **resets the
+demo data**. Opening `/client`, `/pro` or `/admin` directly signs you in as
+that role's demo account.
 
 Seeded scenario to try:
 
@@ -136,7 +142,8 @@ except auth, catalog and webhooks. Errors look like
 | Method | Path | Role | Purpose |
 |--------|------|------|---------|
 | POST | `/auth/register` | public | Client or tradesperson sign-up |
-| POST | `/auth/login` | public | Phone login (dev; see Production) |
+| POST | `/auth/otp/request` | public | Text a login code (when `OTP_REQUIRED=true`) |
+| POST | `/auth/login` | public | `{ phone, otpCode? }` |
 | GET | `/auth/me` | any | Current user and profile |
 | GET | `/catalog` | public | Services, price ranges, fee rate, top-up presets |
 | GET | `/wallet/balance` | tradesperson | Available, locked, last 25 transactions |
@@ -199,27 +206,71 @@ npm run db:push && npm run db:seed
 Status and type columns are strings validated in code
 (`src/domain/constants.js`), so the same schema runs on both databases.
 
-## Tests
+## Checks and tests
 
 ```bash
-cd backend && npm test
+cd backend && npm run check     # eslint + tsc (checkJs) + tests
+cd frontend && npm run lint && npm test
 ```
 
-These cover the money, fee settlement, fraud thresholds and geo helpers as pure
-functions. They need no database.
+None of them need a database or network:
+
+- `backend/test/domain.test.js`: money in integer agorot, fee and settlement
+  math, fraud thresholds, geo.
+- `backend/test/services.test.js`: the real job, wallet and admin services
+  against an in-memory database (`test/helpers/fakePrisma.js`). Covers fee
+  escrow on accept, refusal without balance, double-accept, completion-code
+  checks and lockout, settlement and refunds, cancel and release, flagging and
+  auto-suspension, admin rulings, ledger reconciliation and Stripe
+  idempotency.
+- `backend/test/security.test.js`: phone normalisation, rate limiter windows
+  and fail-open, dev SMS codes (single use, exact length).
+- `frontend/test/mockServer.test.mjs`: the demo scenario and its money rules
+  (Node 22+).
+
+## Production hardening
+
+**SMS login codes.** Set `OTP_REQUIRED=true` and the Twilio Verify
+credentials (`TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`,
+`TWILIO_VERIFY_SERVICE_SID`). Clients call `POST /api/auth/otp/request
+{ phone }`, then send `otpCode` with `/auth/login` or `/auth/register`. The
+login page shows the code step automatically. Without Twilio credentials the
+codes are printed to the server log (and returned outside production), so the
+flow works locally. In production the server refuses to start with phone-only
+login unless `ALLOW_PHONE_ONLY_LOGIN=true`.
+
+**Rate limits** (`backend/src/middleware/rateLimit.js`, `429` with
+`Retry-After`):
+
+| Limit | Window | Key |
+|-------|--------|-----|
+| All `/api` routes | 300 / min | IP |
+| Login, sign-up, code requests | 20 / 15 min | IP |
+| Code requests per phone | 5 / 15 min | phone |
+| New job requests | 10 / hour | user |
+| Completion attempts | 10 / 10 min | user (on top of the 5-wrong-codes lock) |
+
+Counters live in memory, so they are per instance. For several instances, pass
+the included `RedisStore` (ioredis). Set `TRUST_PROXY` to the number of proxies
+in front of the API so limits see real client IPs. Stripe webhooks are not
+rate limited.
+
+Also included: security headers on every response, Prisma conflict and
+not-found errors mapped to 409 and 404, and graceful shutdown of HTTP and
+Socket.io.
 
 ## Before production
 
 This is a complete MVP, not a hardened deployment. Known gaps:
 
-- **Login is phone-only, with no verification.** Add an SMS one-time code (e.g.
-  Twilio Verify) in front of `/auth/login` and `/auth/register`.
-- **No rate limiting.** Add it on auth, job creation and `verify-and-complete`.
 - **License numbers are not verified** against the registry of licensed
   electricians and plumbers.
-- **Migrations.** Use `prisma migrate` instead of `db push`.
-- **One API instance only.** The live location cache is in memory. Use the
-  Socket.io Redis adapter and a shared store to run more than one instance.
+- **Migrations.** `db:push` is for development. Create the first migration
+  with `npm run db:migrate` against your PostgreSQL database, commit
+  `prisma/migrations/`, and run `npm run db:deploy` on release.
+- **One API instance only.** The live location cache and the default rate-limit
+  counters are in memory. Use the Socket.io Redis adapter and `RedisStore` to
+  run more than one instance.
 - **Exact job location** is visible on the radar before acceptance. Consider
   blurring it until a pro accepts.
 - **Straight-line ETA** at 30 km/h. Swap in a routing API for road ETAs.

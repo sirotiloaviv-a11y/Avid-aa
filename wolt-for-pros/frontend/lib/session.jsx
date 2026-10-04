@@ -1,10 +1,10 @@
 'use client';
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { api, getToken, setToken } from './api';
-import { closeSocket } from './socket';
-import { resolveMode } from './demo/mode';
-import { DEMO_PHONE_BY_ROLE, resetDemo } from './demo/mockServer';
+import { api, getToken, setToken } from './api.js';
+import { closeSocket } from './socket.js';
+import { DEMO_PHONE_BY_ROLE } from './demo/mockServer.js';
+import { useDemo } from './demo/DemoContext';
 
 const SessionContext = createContext(null);
 
@@ -14,16 +14,13 @@ export const HOME_BY_ROLE = {
   admin: '/admin/flagged-jobs',
 };
 
-export function SessionProvider({ children }) {
+export function SessionProvider({ children = null }) {
+  const { mode, bumpEpoch } = useDemo();
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [mode, setMode] = useState(null); // 'live' | 'demo'
-  // Bumped on demo role switches and resets so pages remount and refetch.
-  const [epoch, setEpoch] = useState(0);
 
   const refresh = useCallback(async () => {
-    setMode(await resolveMode());
     if (!getToken()) {
       setUser(null);
       setProfile(null);
@@ -35,7 +32,7 @@ export function SessionProvider({ children }) {
       setUser(data.user);
       setProfile(data.profile);
     } catch (err) {
-      if (err.status === 401) setToken(null);
+      if (err.status === 401 || err.code === 'SWITCHED_TO_DEMO') setToken(null);
       setUser(null);
       setProfile(null);
     } finally {
@@ -43,9 +40,10 @@ export function SessionProvider({ children }) {
     }
   }, []);
 
+  // Runs once the mode is known, and again if the app falls back to demo.
   useEffect(() => {
-    refresh();
-  }, [refresh]);
+    if (mode) refresh();
+  }, [refresh, mode]);
 
   const applyAuth = useCallback((data) => {
     setToken(data.token);
@@ -55,21 +53,21 @@ export function SessionProvider({ children }) {
     return data.user;
   }, []);
 
-  const login = useCallback(async (phone) => applyAuth(await api('/api/auth/login', { method: 'POST', body: { phone } })), [applyAuth]);
+  // With OTP enabled on the server, call requestOtp(phone) first and pass the
+  // texted code as otpCode.
+  const requestOtp = useCallback((phone) => api('/api/auth/otp/request', { method: 'POST', body: { phone } }), []);
+  const login = useCallback(
+    async (phone, otpCode) => applyAuth(await api('/api/auth/login', { method: 'POST', body: { phone, otpCode: otpCode || undefined } })),
+    [applyAuth],
+  );
   const register = useCallback(async (payload) => applyAuth(await api('/api/auth/register', { method: 'POST', body: payload })), [applyAuth]);
 
   // Demo mode only: sign in as the seeded account for a role.
   const loginAsRole = useCallback(async (role) => {
     const u = await login(DEMO_PHONE_BY_ROLE[role]);
-    setEpoch((e) => e + 1);
+    bumpEpoch();
     return u;
-  }, [login]);
-
-  const resetDemoData = useCallback(async () => {
-    resetDemo();
-    if (user) await login(user.phone);
-    setEpoch((e) => e + 1);
-  }, [login, user]);
+  }, [login, bumpEpoch]);
 
   const logout = useCallback(() => {
     setToken(null);
@@ -79,8 +77,8 @@ export function SessionProvider({ children }) {
   }, []);
 
   const value = useMemo(
-    () => ({ user, profile, setProfile, loading, login, register, logout, refresh, mode, epoch, loginAsRole, resetDemoData }),
-    [user, profile, loading, login, register, logout, refresh, mode, epoch, loginAsRole, resetDemoData],
+    () => ({ user, profile, setProfile, loading, login, requestOtp, register, logout, refresh, loginAsRole }),
+    [user, profile, loading, login, requestOtp, register, logout, refresh, loginAsRole],
   );
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
 }

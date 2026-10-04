@@ -4,7 +4,7 @@ import { useEffect } from 'react';
 import { X } from 'lucide-react';
 
 // Bottom sheet on phones, centred dialog from sm up.
-export default function Modal({ open, onClose, title, children, footer }) {
+export default function Modal({ open, onClose, title, children = null, footer = null }) {
   useEffect(() => {
     if (!open) return undefined;
     const onKey = (e) => e.key === 'Escape' && onClose();

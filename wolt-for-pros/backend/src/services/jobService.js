@@ -58,7 +58,7 @@ async function getProfile(userId) {
   return profile;
 }
 
-async function createJob(clientUser, { serviceType, description, latitude, longitude, address }) {
+async function createJob(clientUser, { serviceType, description, latitude, longitude, address = null }) {
   const { estimate } = estimateFor(serviceType);
   const job = await prisma.job.create({
     data: {

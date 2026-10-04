@@ -11,6 +11,7 @@ router.get('/', (req, res) => {
     feeRate: config.platformFeeRate,
     services: catalog(),
     topUp: { presets: TOP_UP_PRESETS, min: TOP_UP_MIN, max: TOP_UP_MAX, mockMode: config.stripe.mockMode },
+    auth: { otpRequired: config.otpRequired },
   });
 });
 

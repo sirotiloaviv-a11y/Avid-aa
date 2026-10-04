@@ -1,6 +1,6 @@
 'use client';
 
-import { API_URL } from '../config';
+import { API_URL } from '../config.js';
 
 // Decides once per page load whether to talk to the real backend ('live') or
 // to the in-browser mock ('demo').
@@ -13,6 +13,7 @@ const PROBE_TIMEOUT_MS = 2500;
 
 let mode = null;
 let pending = null;
+const listeners = new Set();
 
 export function currentMode() {
   return mode;
@@ -20,6 +21,23 @@ export function currentMode() {
 
 export function isDemoMode() {
   return mode === 'demo';
+}
+
+// Subscribe to mode changes (a live session falling back to demo).
+export function onModeChange(fn) {
+  listeners.add(fn);
+  return () => listeners.delete(fn);
+}
+
+// Called when a live request cannot reach the backend. Returns true when
+// the app switched (or already was) in demo mode.
+export function fallBackToDemo() {
+  if (FORCED === 'false') return false;
+  if (mode === 'demo') return true;
+  mode = 'demo';
+  pending = Promise.resolve(mode);
+  listeners.forEach((fn) => fn(mode));
+  return true;
 }
 
 export function resolveMode() {

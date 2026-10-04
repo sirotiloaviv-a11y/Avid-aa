@@ -38,7 +38,7 @@ async function holdFee(tx, { walletId, cents, jobId }) {
   });
 }
 
-async function releaseHold(tx, { walletId, cents, jobId, note }) {
+async function releaseHold(tx, { walletId, cents, jobId, note = null }) {
   if (!cents || cents <= 0) return;
   const amount = fromCents(cents);
   const { count } = await tx.wallet.updateMany({
@@ -51,7 +51,7 @@ async function releaseHold(tx, { walletId, cents, jobId, note }) {
   });
 }
 
-async function settleFee(tx, { walletId, heldCents, finalFeeCents, jobId, note }) {
+async function settleFee(tx, { walletId, heldCents, finalFeeCents, jobId, note = null }) {
   const s = settlement(heldCents, finalFeeCents);
   const { count } = await tx.wallet.updateMany({
     where: { id: walletId, lockedBalance: { gte: fromCents(heldCents) } },

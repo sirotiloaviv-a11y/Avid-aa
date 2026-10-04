@@ -4,7 +4,9 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ShieldCheck, MapPin, Wallet, Zap, Droplets, Hammer, Loader2 } from 'lucide-react';
 import { HOME_BY_ROLE, useSession } from '@/lib/session';
+import { useDemo } from '@/lib/demo/DemoContext';
 import { useToast } from '@/components/ui/Toast';
+import { api } from '@/lib/api';
 
 const DEMO_ACCOUNTS = [
   { phone: '0501111111', label: 'Dana', hint: 'Client' },
@@ -15,17 +17,48 @@ const DEMO_ACCOUNTS = [
 ];
 
 export default function Home() {
-  const { user, loading, login, register } = useSession();
+  const { user, loading, login, register, requestOtp } = useSession();
+  const { isDemo } = useDemo();
   const router = useRouter();
   const toast = useToast();
   const [mode, setMode] = useState('login');
   const [busy, setBusy] = useState(false);
   const [phone, setPhone] = useState('');
   const [form, setForm] = useState({ role: 'client', name: '', phone: '', licenseNumber: '', serviceType: 'electrician' });
+  // SMS one-time code step, shown only when the server requires it.
+  const [otpRequired, setOtpRequired] = useState(false);
+  const [otpSentTo, setOtpSentTo] = useState(null);
+  const [otpCode, setOtpCode] = useState('');
 
   useEffect(() => {
     if (!loading && user) router.replace(HOME_BY_ROLE[user.role] || '/');
   }, [loading, user, router]);
+
+  useEffect(() => {
+    api('/api/catalog').then((c) => setOtpRequired(Boolean(c.auth && c.auth.otpRequired))).catch(() => {});
+  }, [isDemo]);
+
+  useEffect(() => {
+    setOtpSentTo(null);
+    setOtpCode('');
+  }, [isDemo]);
+
+  // Returns true when the caller should stop and wait for the code.
+  async function needsCode(targetPhone) {
+    if (!otpRequired || otpSentTo === targetPhone) return false;
+    setBusy(true);
+    try {
+      const res = await requestOtp(targetPhone);
+      setOtpSentTo(targetPhone);
+      setOtpCode('');
+      toast(res.devCode ? `Code sent (development code: ${res.devCode})` : 'We texted you a 6-digit code', 'info', 8000);
+    } catch (err) {
+      toast(err.message, 'error');
+    } finally {
+      setBusy(false);
+    }
+    return true;
+  }
 
   async function run(fn) {
     setBusy(true);
@@ -39,13 +72,41 @@ export default function Home() {
     }
   }
 
-  function onRegister(e) {
+  async function onLogin(e) {
     e.preventDefault();
-    const payload = form.role === 'client'
+    if (await needsCode(phone)) return;
+    run(() => login(phone, otpCode));
+  }
+
+  async function onRegister(e) {
+    e.preventDefault();
+    if (await needsCode(form.phone)) return;
+    const base = form.role === 'client'
       ? { role: 'client', name: form.name, phone: form.phone }
       : form;
-    run(() => register(payload));
+    run(() => register({ ...base, otpCode: otpCode || undefined }));
   }
+
+  const codeField = otpSentTo ? (
+    <div>
+      <label className="label" htmlFor="otp">Code sent to {otpSentTo}</label>
+      <input
+        id="otp"
+        className="input text-center font-mono text-xl tracking-[0.4em]"
+        inputMode="numeric"
+        autoComplete="one-time-code"
+        maxLength={8}
+        value={otpCode}
+        onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ''))}
+        required
+        autoFocus
+      />
+      <button type="button" className="mt-1 text-xs font-semibold text-brand-700" onClick={() => setOtpSentTo(null)}>
+        Use a different number or resend
+      </button>
+    </div>
+  ) : null;
+  const submitLabel = otpRequired && !otpSentTo ? 'Text me a code' : null;
 
   const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
 
@@ -98,15 +159,17 @@ export default function Home() {
 
             {mode === 'login' ? (
               <>
-                <form onSubmit={(e) => { e.preventDefault(); run(() => login(phone)); }} className="space-y-3">
+                <form onSubmit={onLogin} className="space-y-3">
                   <div>
                     <label className="label" htmlFor="phone">Phone number</label>
                     <input id="phone" className="input" inputMode="tel" placeholder="05XXXXXXXX" value={phone} onChange={(e) => setPhone(e.target.value)} required />
                   </div>
+                  {otpSentTo === phone && codeField}
                   <button className="btn-primary w-full" disabled={busy}>
-                    {busy && <Loader2 className="h-4 w-4 animate-spin" />} Continue
+                    {busy && <Loader2 className="h-4 w-4 animate-spin" />} {submitLabel || 'Continue'}
                   </button>
                 </form>
+                {(isDemo || !otpRequired) && (
                 <div className="mt-6">
                   <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Demo accounts</p>
                   <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
@@ -124,6 +187,7 @@ export default function Home() {
                     ))}
                   </div>
                 </div>
+                )}
               </>
             ) : (
               <form onSubmit={onRegister} className="space-y-3">
@@ -166,8 +230,9 @@ export default function Home() {
                     </div>
                   </>
                 )}
+                {otpSentTo === form.phone && codeField}
                 <button className="btn-primary w-full" disabled={busy}>
-                  {busy && <Loader2 className="h-4 w-4 animate-spin" />} Create account
+                  {busy && <Loader2 className="h-4 w-4 animate-spin" />} {submitLabel || 'Create account'}
                 </button>
               </form>
             )}

@@ -1,7 +1,7 @@
-import { API_URL } from './config';
-import { ApiError } from './errors';
-import { resolveMode } from './demo/mode';
-import { mockRequest } from './demo/mockServer';
+import { API_URL } from './config.js';
+import { ApiError } from './errors.js';
+import { fallBackToDemo, resolveMode } from './demo/mode.js';
+import { mockRequest } from './demo/mockServer.js';
 
 export { API_URL, ApiError };
 
@@ -24,7 +24,12 @@ export function setToken(token) {
   }
 }
 
-export async function api(path, { method = 'GET', body, query } = {}) {
+/**
+ * @param {string} path
+ * @param {{ method?: string, body?: any, query?: Record<string, any> }} [options]
+ * @returns {Promise<any>}
+ */
+export async function api(path, { method = 'GET', body = undefined, query = undefined } = {}) {
   if ((await resolveMode()) === 'demo') {
     return mockRequest({ method, path, body, query, token: getToken() });
   }
@@ -48,6 +53,15 @@ export async function api(path, { method = 'GET', body, query } = {}) {
   try {
     res = await fetch(url, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
   } catch {
+    // Backend unreachable: switch the whole app to the in-browser demo. A
+    // signed-out request is answered by the mock right away; a signed-in one
+    // fails once, because the live token means nothing to the mock (the
+    // pages then remount and sign in to the demo, see DemoContext).
+    if (fallBackToDemo()) {
+      if (!token) return mockRequest({ method, path, body, query, token: null });
+      setToken(null);
+      throw new ApiError('The server is unreachable, so the app switched to demo mode.', 0, 'SWITCHED_TO_DEMO');
+    }
     throw new ApiError(`Cannot reach the server at ${API_URL}. Is the backend running?`, 0, 'NETWORK');
   }
   const data = await res.json().catch(() => ({}));

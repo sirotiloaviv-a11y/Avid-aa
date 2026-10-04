@@ -2,9 +2,9 @@
 
 import { useEffect, useRef } from 'react';
 import { io } from 'socket.io-client';
-import { API_URL, getToken } from './api';
-import { isDemoMode } from './demo/mode';
-import { demoSocket } from './demo/mockServer';
+import { API_URL, getToken } from './api.js';
+import { isDemoMode } from './demo/mode.js';
+import { demoSocket } from './demo/mockServer.js';
 
 let socket = null;
 let socketToken = null;

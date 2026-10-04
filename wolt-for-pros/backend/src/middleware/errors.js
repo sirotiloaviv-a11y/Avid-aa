@@ -24,13 +24,22 @@ function notFound(req, res) {
   res.status(404).json({ error: { message: `No route for ${req.method} ${req.path}`, code: 'NOT_FOUND' } });
 }
 
-// eslint-disable-next-line no-unused-vars
 function errorHandler(err, req, res, next) {
   if (err instanceof ZodError) {
     return res.status(400).json({ error: { message: 'Invalid request', code: 'VALIDATION_ERROR', details: err.flatten() } });
   }
   if (err instanceof HttpError) {
     return res.status(err.status).json({ error: { message: err.message, code: err.code, details: err.details } });
+  }
+  // Prisma known request errors that reach here are client-caused races.
+  if (err && err.code === 'P2002') {
+    return res.status(409).json({ error: { message: 'That record already exists', code: 'CONFLICT' } });
+  }
+  if (err && err.code === 'P2025') {
+    return res.status(404).json({ error: { message: 'Record not found', code: 'NOT_FOUND' } });
+  }
+  if (err && err.type === 'entity.too.large') {
+    return res.status(413).json({ error: { message: 'Request body too large', code: 'TOO_LARGE' } });
   }
   if (err && err.type === 'entity.parse.failed') {
     return res.status(400).json({ error: { message: 'Malformed JSON body', code: 'BAD_JSON' } });

@@ -4,13 +4,14 @@ import { useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { HOME_BY_ROLE, useSession } from '@/lib/session';
+import { useDemo } from '@/lib/demo/DemoContext';
 import Spinner from './ui/Spinner';
 
-export default function RoleGate({ role, children }) {
-  const { user, loading, mode, loginAsRole } = useSession();
+export default function RoleGate({ role, children = null }) {
+  const { user, loading, loginAsRole } = useSession();
+  const { isDemo: demo } = useDemo();
   const router = useRouter();
   const switching = useRef(false);
-  const demo = mode === 'demo';
 
   useEffect(() => {
     if (loading) return;

@@ -15,8 +15,7 @@ import { api } from '@/lib/api';
 import { formatDateTime, formatILS, SERVICE_LABELS } from '@/lib/format';
 import { etaSeconds, formatDistance, haversineKm } from '@/lib/geo';
 import { useJobChannel, useSocketEvent } from '@/lib/socket';
-import { useSession } from '@/lib/session';
-import { isDemoDriving, toggleDemoDrive } from '@/lib/demo/mockServer';
+import { useDemo } from '@/lib/demo/DemoContext';
 
 const LIVE_STATUSES = ['assigned', 'in_progress'];
 
@@ -41,9 +40,8 @@ function formatCountdown(seconds) {
 
 function JobTracking({ jobId }) {
   const toast = useToast();
-  const { mode } = useSession();
-  const demo = mode === 'demo';
-  const [driving, setDriving] = useState(() => demo && isDemoDriving(jobId));
+  const { isDemo: demo, isDriving, toggleDrive } = useDemo();
+  const driving = isDriving(jobId);
   const [job, setJob] = useState(null);
   const [error, setError] = useState(null);
   const [pro, setPro] = useState(null); // { lat, lng, distanceKm, at }
@@ -94,12 +92,6 @@ function JobTracking({ jobId }) {
       applyLocation({ ...p, distanceKm: haversineKm(p, { lat: job.latitude, lng: job.longitude }) });
     }
   }, [job, pro, applyLocation]);
-
-  useSocketEvent('demo:drive', (msg) => {
-    if (msg.jobId !== jobId) return;
-    setDriving(msg.active);
-    if (msg.arrived) toast('Your pro has arrived!', 'success');
-  });
 
   const countdown = useCountdown(job && job.status === 'assigned' ? etaTarget : null);
 
@@ -160,7 +152,7 @@ function JobTracking({ jobId }) {
               <p className="flex items-center gap-2 text-sm text-amber-900">
                 <FlaskConical className="h-4 w-4 shrink-0" /> Demo: watch your pro drive over in real time.
               </p>
-              <button type="button" onClick={() => toggleDemoDrive(job.id)} className={`btn shrink-0 ${driving ? 'bg-amber-200 text-amber-900' : 'btn-primary'}`}>
+              <button type="button" onClick={() => toggleDrive(job.id)} className={`btn shrink-0 ${driving ? 'bg-amber-200 text-amber-900' : 'btn-primary'}`}>
                 <Route className="h-4 w-4" /> {driving ? 'Stop' : 'Simulate Driver Movement'}
               </button>
             </div>
@@ -233,7 +225,7 @@ function JobTracking({ jobId }) {
   );
 }
 
-function Row({ label, value, strong }) {
+function Row({ label, value, strong = false }) {
   return (
     <div className="flex justify-between gap-4">
       <span className="text-slate-500">{label}</span>

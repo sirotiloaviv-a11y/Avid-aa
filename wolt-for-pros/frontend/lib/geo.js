@@ -24,7 +24,10 @@ export function formatDistance(km) {
 // One-shot browser position with a timeout; resolves null if unavailable.
 export function getBrowserPosition(timeoutMs = 8000) {
   return new Promise((resolve) => {
-    if (typeof navigator === 'undefined' || !navigator.geolocation) return resolve(null);
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      resolve(null);
+      return;
+    }
     navigator.geolocation.getCurrentPosition(
       (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
       () => resolve(null),

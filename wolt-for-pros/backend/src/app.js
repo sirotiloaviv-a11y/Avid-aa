@@ -2,9 +2,13 @@ const express = require('express');
 const cors = require('cors');
 const config = require('./config');
 const { notFound, errorHandler } = require('./middleware/errors');
+const { securityHeaders } = require('./middleware/security');
+const { limits } = require('./middleware/rateLimit');
 
 const app = express();
 app.disable('x-powered-by');
+if (config.trustProxy) app.set('trust proxy', config.trustProxy);
+app.use(securityHeaders);
 app.use(cors({ origin: config.frontendUrl }));
 
 // Stripe webhooks need the raw body, so they go before the JSON parser.
@@ -13,6 +17,7 @@ app.use('/api/webhooks', require('./routes/webhooks'));
 app.use(express.json({ limit: '100kb' }));
 
 app.get('/api/health', (req, res) => res.json({ ok: true, stripeMockMode: config.stripe.mockMode }));
+app.use('/api', limits.api);
 app.use('/api/catalog', require('./routes/catalog'));
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/wallet', require('./routes/wallet'));
