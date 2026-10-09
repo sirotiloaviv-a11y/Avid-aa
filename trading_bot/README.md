@@ -18,11 +18,11 @@ limits, executes through ccxt, and reports to Telegram.
 cd trading_bot
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env   # fill in, then: set -a; source .env; set +a
+cp .env.example .env   # fill in; config.py reads it automatically
 python main.py
 ```
 
-`DRY_RUN` is on unless you explicitly set `DRY_RUN=false`.
+`ENVIRONMENT=paper` (the default) simulates every order; only `ENVIRONMENT=live` trades for real.
 
 ## TradingView alert body
 

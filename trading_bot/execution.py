@@ -1,4 +1,4 @@
-"""Order execution through ccxt. Paper-trades when config.DRY_RUN is set."""
+"""Order execution through ccxt. Paper-trades unless config.ENVIRONMENT is "live"."""
 
 import logging
 

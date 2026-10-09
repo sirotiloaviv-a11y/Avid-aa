@@ -62,8 +62,8 @@ class TestPersistence(RiskManagerTestCase):
         with self.on_day("2026-09-26"):
             self.make().trigger_emergency_kill_switch("test")
             restarted = self.make()
-        self.assertTrue(restarted.kill_switch_active)
-        self.assertEqual(restarted.can_execute_trade("buy", 100, 99), (False, "kill switch active"))
+            self.assertTrue(restarted.kill_switch_active)
+            self.assertEqual(restarted.can_execute_trade("buy", 100, 99), (False, "kill switch active"))
 
     def test_state_file_contents(self):
         with self.on_day("2026-09-26"):

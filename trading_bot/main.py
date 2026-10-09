@@ -96,6 +96,7 @@ class Signal(BaseModel):
 def health() -> dict:
     return {
         "status": "ok",
+        "environment": config.ENVIRONMENT,
         "dry_run": executor.dry_run,
         "daily_pnl": risk.daily_pnl,
         "kill_switch_active": risk.kill_switch_active,
@@ -241,8 +242,8 @@ def telegram_webhook(
 
 def main() -> None:
     log.info(
-        "Starting bot: balance=%s, daily loss limit=%.2f%%, dry_run=%s",
-        config.ACCOUNT_BALANCE, config.MAX_DAILY_LOSS_PCT, config.DRY_RUN,
+        "Starting bot: environment=%s, balance=%s, daily loss limit=%.2f%%",
+        config.ENVIRONMENT, config.ACCOUNT_BALANCE, config.MAX_DAILY_LOSS_PCT,
     )
     uvicorn.run(app, host=config.WEBHOOK_HOST, port=config.WEBHOOK_PORT)
 

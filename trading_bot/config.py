@@ -1,11 +1,30 @@
 """Bot configuration.
 
-Secrets are read from environment variables (or a local .env you export
-yourself) and fall back to placeholders. Never hardcode real keys here.
+Settings come from environment variables, then from trading_bot/.env, then
+fall back to placeholders. Never hardcode real keys here.
 """
 
 import os
 from pathlib import Path
+
+
+def _load_dotenv(path: Path) -> None:
+    """Minimal .env reader: KEY=VALUE lines, # comments, optional quotes.
+    Real environment variables always win over the file."""
+    if not path.is_file():
+        return
+    for raw in path.read_text().splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key, value = key.removeprefix("export ").strip(), value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        os.environ.setdefault(key, value)
+
+
+_load_dotenv(Path(__file__).with_name(".env"))
 
 
 def _env(name: str, default: str) -> str:
@@ -39,5 +58,8 @@ MAX_RISK_PER_TRADE_PCT = 0.25      # % of ACCOUNT_BALANCE risked per trade
 DAILY_STATE_FILE = _env("DAILY_STATE_FILE", str(Path(__file__).with_name("daily_state.json")))
 
 # --- Execution ------------------------------------------------------------
-# Paper-trade by default; set DRY_RUN=false only when you mean it.
-DRY_RUN = _env("DRY_RUN", "true").lower() != "false"
+# "paper" simulates every order; only "live" sends orders to the exchange.
+ENVIRONMENT = _env("ENVIRONMENT", "paper").strip().lower()
+if ENVIRONMENT not in ("paper", "live"):
+    raise ValueError(f"ENVIRONMENT must be 'paper' or 'live', got {ENVIRONMENT!r}")
+DRY_RUN = ENVIRONMENT != "live"
