@@ -1,0 +1,816 @@
+<title>Nexus Algo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+/* Layout: terminal grid. Sticky status header, 4-up KPI strip, then a 2:1 split —
+   chart + positions on the left, allocation / event stream / Telegram on the right. */
+:root {
+  color-scheme: dark;
+  --bg: #0b1222;          /* page, a shade under slate-900 */
+  --panel: #0f172a;       /* requested base navy */
+  --panel-2: #131d33;
+  --line: #1e293b;
+  --line-2: #273449;
+  --fg: #e2e8f0;
+  --muted: #8a99b3;
+  --dim: #5b6a85;
+  --profit: #10b981;
+  --profit-soft: rgba(16,185,129,.14);
+  --risk: #ef4444;
+  --risk-soft: rgba(239,68,68,.14);
+  --sys: #6366f1;
+  --sys-soft: rgba(99,102,241,.16);
+  --warn: #f59e0b;
+  --warn-soft: rgba(245,158,11,.14);
+  --font-ui: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-data: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  --r: 10px;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body {
+  background: var(--bg);
+  background-image:
+    radial-gradient(900px 400px at 85% -10%, rgba(99,102,241,.10), transparent 60%),
+    radial-gradient(700px 300px at -10% 20%, rgba(16,185,129,.06), transparent 60%);
+  color: var(--fg);
+  font: 14px/1.45 var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+}
+.num, .mono { font-family: var(--font-data); font-variant-numeric: tabular-nums; }
+.pos { color: var(--profit); }
+.neg { color: var(--risk); }
+.sys { color: var(--sys); }
+.muted { color: var(--muted); }
+button { font: inherit; color: inherit; cursor: pointer; }
+button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--sys); outline-offset: 2px; }
+
+/* ---------- Header ---------- */
+.topbar {
+  position: sticky; top: env(safe-area-inset-top, 0px); z-index: 20;
+  background: rgba(11,18,34,.86); backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--line);
+}
+.topbar-inner {
+  max-width: 1600px; margin: 0 auto; padding: 12px 20px;
+  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+}
+.brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.logo {
+  width: 34px; height: 34px; border-radius: 8px; flex: none;
+  background: linear-gradient(135deg, var(--sys), #4338ca);
+  box-shadow: 0 0 18px rgba(99,102,241,.45);
+  display: grid; place-items: center;
+}
+.brand-name { font-weight: 700; letter-spacing: .08em; font-size: 15px; white-space: nowrap; }
+.brand-name span { color: var(--dim); font-weight: 500; letter-spacing: .02em; }
+.status-strip { display: flex; gap: 8px; flex-wrap: wrap; margin-left: auto; align-items: center; }
+.chip {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 5px 10px; border-radius: 999px; font-size: 12px;
+  border: 1px solid var(--line-2); background: var(--panel); white-space: nowrap;
+}
+.chip b { font-weight: 600; }
+.chip.ok { border-color: rgba(16,185,129,.35); background: var(--profit-soft); }
+.chip.sysc { border-color: rgba(99,102,241,.35); background: var(--sys-soft); }
+.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--profit); box-shadow: 0 0 8px var(--profit); }
+.dot.pulse { animation: pulse 1.8s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: .35; } }
+.kill {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 8px 14px; border-radius: 8px; font-weight: 700; font-size: 13px; letter-spacing: .03em;
+  background: linear-gradient(180deg, #f05252, #c81e1e); color: #fff;
+  border: 1px solid #f87171; box-shadow: 0 0 0 0 rgba(239,68,68,.55), 0 4px 18px rgba(239,68,68,.35);
+  animation: killglow 2.6s ease-in-out infinite;
+}
+.kill:hover { filter: brightness(1.1); }
+@keyframes killglow { 50% { box-shadow: 0 0 0 5px rgba(239,68,68,0), 0 4px 24px rgba(239,68,68,.55); } }
+
+/* ---------- Page ---------- */
+main { max-width: 1600px; margin: 0 auto; padding-inline: 20px; padding-block: 18px 40px; display: grid; gap: 16px; }
+.panel {
+  background: linear-gradient(180deg, var(--panel-2), var(--panel));
+  border: 1px solid var(--line); border-radius: var(--r);
+  min-width: 0;
+}
+.panel-h {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 12px 16px; border-bottom: 1px solid var(--line);
+}
+.panel-h h2 { margin: 0; font-size: 12px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.panel-h .right { margin-left: auto; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.panel-b { padding: 14px 16px; }
+.tag {
+  font: 500 11px/1 var(--font-data); padding: 4px 7px; border-radius: 5px;
+  border: 1px solid var(--line-2); color: var(--muted); background: rgba(255,255,255,.02);
+}
+.tag.g { color: var(--profit); border-color: rgba(16,185,129,.35); background: var(--profit-soft); }
+.tag.r { color: var(--risk); border-color: rgba(239,68,68,.35); background: var(--risk-soft); }
+.tag.i { color: #a5b4fc; border-color: rgba(99,102,241,.4); background: var(--sys-soft); }
+.tag.w { color: var(--warn); border-color: rgba(245,158,11,.35); background: var(--warn-soft); }
+
+/* ---------- KPI row ---------- */
+.kpis { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 16px; }
+.kpi { padding: 14px 16px 12px; display: grid; gap: 6px; position: relative; overflow: hidden; }
+.kpi-label { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); display: flex; justify-content: space-between; gap: 8px; }
+.kpi-value { font: 600 26px/1.15 var(--font-data); font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+.kpi-sub { font: 500 12px/1.3 var(--font-data); color: var(--muted); display: flex; gap: 10px; flex-wrap: wrap; }
+.kpi.glow-g { box-shadow: inset 0 1px 0 rgba(16,185,129,.35); }
+.kpi svg { display: block; width: 100%; height: 44px; }
+.split { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.split .kpi-value { font-size: 21px; }
+.bar { height: 6px; border-radius: 4px; background: var(--line); overflow: hidden; display: flex; }
+.bar > i { display: block; height: 100%; }
+.gauge-wrap { display: flex; align-items: center; gap: 14px; }
+.gauge-wrap svg { width: 120px; height: 68px; flex: none; }
+
+/* ---------- Main grid ---------- */
+.grid { display: grid; grid-template-columns: minmax(0, 2.05fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.col { display: grid; gap: 16px; min-width: 0; }
+
+/* chart */
+.seg { display: inline-flex; border: 1px solid var(--line-2); border-radius: 7px; overflow: hidden; }
+.seg button { background: transparent; border: 0; padding: 5px 10px; font: 500 12px var(--font-data); color: var(--muted); }
+.seg button[aria-pressed="true"] { background: var(--sys-soft); color: #c7d2fe; }
+.chart-box { position: relative; }
+#equity { display: block; width: 100%; height: 320px; }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--muted); padding: 0 16px 14px; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.lg-line { width: 16px; height: 2px; border-radius: 2px; }
+.lg-tri { width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; }
+.tip {
+  position: absolute; pointer-events: none; z-index: 5;
+  background: #0a1020; border: 1px solid var(--line-2); border-radius: 8px;
+  padding: 8px 10px; font: 12px/1.45 var(--font-data); white-space: nowrap;
+  box-shadow: 0 8px 30px rgba(0,0,0,.45);
+}
+.strat-row { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); border-top: 1px solid var(--line); }
+.strat { padding: 12px 16px; border-right: 1px solid var(--line); display: grid; gap: 3px; }
+.strat:last-child { border-right: 0; }
+.strat .n { font-size: 12px; color: var(--muted); }
+.strat .v { font: 600 15px var(--font-data); }
+.strat .m { font: 11px var(--font-data); color: var(--dim); }
+
+/* table */
+.tbl-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 760px; }
+th { text-align: left; font: 600 11px var(--font-ui); letter-spacing: .08em; text-transform: uppercase; color: var(--dim); padding: 10px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+td { padding: 11px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; font-family: var(--font-data); font-variant-numeric: tabular-nums; }
+th.r, td.r { text-align: right; }
+tbody tr:hover { background: rgba(99,102,241,.05); }
+tfoot td { border-bottom: 0; font-weight: 600; }
+.sym { font-family: var(--font-ui); font-weight: 600; }
+.sym small { display: block; font: 400 11px var(--font-data); color: var(--dim); }
+.side { font: 700 11px var(--font-data); padding: 3px 8px; border-radius: 5px; letter-spacing: .05em; }
+.side.buy { color: var(--profit); background: var(--profit-soft); }
+.side.sell { color: var(--risk); background: var(--risk-soft); }
+.prot { display: inline-flex; gap: 5px; }
+.flash-up { animation: fu .8s; } .flash-dn { animation: fd .8s; }
+@keyframes fu { from { background: rgba(16,185,129,.25); } }
+@keyframes fd { from { background: rgba(239,68,68,.25); } }
+
+/* allocation */
+.alloc-total { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+.alloc-total .num { font-size: 20px; font-weight: 600; }
+.stack { height: 10px; border-radius: 6px; overflow: hidden; display: flex; gap: 2px; margin-bottom: 14px; }
+.stack i { display: block; height: 100%; }
+.acct { display: grid; grid-template-columns: 10px minmax(0,1fr) auto; gap: 4px 10px; align-items: center; padding: 10px 0; border-top: 1px solid var(--line); }
+.acct .sw { width: 10px; height: 10px; border-radius: 3px; }
+.acct .nm { font-weight: 600; font-size: 13px; }
+.acct .nm small { display: block; font-weight: 400; color: var(--dim); font: 11px var(--font-data); margin-top: 2px; }
+.acct .amt { text-align: right; font: 600 13px var(--font-data); }
+.acct .amt small { display: block; font-weight: 400; color: var(--muted); font-size: 11px; }
+.acct .meter { grid-column: 2 / 4; }
+
+/* event stream */
+.log { font: 12px/1.5 var(--font-data); max-height: 330px; overflow-y: auto; }
+.ev { display: grid; grid-template-columns: 62px 64px minmax(0,1fr); gap: 8px; padding: 7px 16px; border-bottom: 1px solid rgba(30,41,59,.6); align-items: start; }
+.ev:first-child { animation: evin .5s ease-out; }
+@keyframes evin { from { background: rgba(99,102,241,.14); } }
+.ev .t { color: var(--dim); }
+.ev .k { font-weight: 600; font-size: 10.5px; padding: 1px 6px; border-radius: 4px; text-align: center; }
+.k.SIG { color: #a5b4fc; background: var(--sys-soft); }
+.k.RISK { color: var(--warn); background: var(--warn-soft); }
+.k.FILL { color: var(--profit); background: var(--profit-soft); }
+.k.TP { color: var(--profit); background: var(--profit-soft); }
+.k.SL, .k.REJ { color: var(--risk); background: var(--risk-soft); }
+.k.SYS { color: var(--muted); background: rgba(255,255,255,.05); }
+.ev .msg { color: var(--fg); overflow-wrap: anywhere; }
+.ev .msg em { font-style: normal; color: var(--dim); }
+
+/* telegram sync */
+.sync-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.sync-item { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: grid; gap: 2px; }
+.sync-item .l { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
+.sync-item .v { font: 600 14px var(--font-data); }
+.toggles { display: grid; gap: 8px; margin-top: 12px; }
+.tg { display: flex; justify-content: space-between; align-items: center; font-size: 13px; gap: 8px; }
+.sw-t { width: 32px; height: 18px; border-radius: 10px; background: var(--line-2); position: relative; border: 0; flex: none; transition: background .2s; }
+.sw-t::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #cbd5e1; transition: transform .2s; }
+.sw-t[aria-checked="true"] { background: var(--profit); }
+.sw-t[aria-checked="true"]::after { transform: translateX(14px); background: #fff; }
+
+/* telegram console */
+.tgc { display: flex; flex-direction: column; }
+.chat { padding: 14px; display: flex; flex-direction: column; gap: 10px; max-height: 420px; overflow-y: auto; background:
+  linear-gradient(180deg, rgba(99,102,241,.04), transparent); }
+.msg-b { max-width: 92%; padding: 8px 11px; border-radius: 12px; font-size: 13px; line-height: 1.45; }
+.msg-b.me { align-self: flex-end; background: #3730a3; color: #e0e7ff; border-bottom-right-radius: 4px; font-family: var(--font-data); }
+.msg-b.bot { align-self: flex-start; background: #172036; border: 1px solid var(--line-2); border-bottom-left-radius: 4px; font-family: var(--font-data); font-size: 12px; white-space: pre-wrap; }
+.msg-b .who { display: block; font: 600 11px var(--font-ui); color: #a5b4fc; margin-bottom: 3px; }
+.msg-b .ts { display: block; text-align: right; font-size: 10px; color: var(--dim); margin-top: 4px; }
+.me .ts { color: #a5b4fc; }
+.cmds { display: flex; gap: 6px; flex-wrap: wrap; padding: 10px 14px; border-top: 1px solid var(--line); }
+.cmd { background: var(--panel); border: 1px solid var(--line-2); border-radius: 6px; padding: 6px 10px; font: 500 12px var(--font-data); color: #c7d2fe; }
+.cmd:hover { border-color: var(--sys); background: var(--sys-soft); }
+.cmd.danger { color: #fca5a5; }
+.cmd.danger:hover { border-color: var(--risk); background: var(--risk-soft); }
+
+/* modal */
+.modal-bg { position: fixed; inset: 0; background: rgba(2,6,16,.72); backdrop-filter: blur(3px); display: grid; place-items: center; z-index: 50; padding: 16px; }
+.modal { width: min(440px, 100%); background: var(--panel); border: 1px solid rgba(239,68,68,.5); border-radius: 12px; box-shadow: 0 0 60px rgba(239,68,68,.25); }
+.modal h3 { margin: 0; font-size: 16px; color: #fecaca; }
+.modal p { margin: 0; color: var(--muted); font-size: 13px; }
+.modal ul { margin: 0; padding-left: 18px; color: var(--fg); font-size: 13px; display: grid; gap: 4px; }
+.modal .body { padding: 18px; display: grid; gap: 12px; }
+.modal .actions { display: flex; gap: 8px; justify-content: flex-end; padding: 12px 18px; border-top: 1px solid var(--line); }
+.btn { padding: 8px 14px; border-radius: 7px; border: 1px solid var(--line-2); background: transparent; font-weight: 600; font-size: 13px; }
+.btn.red { background: var(--risk); border-color: var(--risk); color: #fff; }
+.killed-banner { background: var(--risk-soft); border: 1px solid rgba(239,68,68,.5); color: #fecaca; border-radius: var(--r); padding: 10px 16px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 13px; }
+
+.foot { color: var(--dim); font-size: 11px; text-align: center; font-family: var(--font-data); }
+
+@media (max-width: 1180px) {
+  .kpis { grid-template-columns: repeat(2, minmax(0,1fr)); }
+  .grid { grid-template-columns: minmax(0,1fr); }
+  .col.right { grid-template-columns: repeat(2, minmax(0,1fr)); }
+}
+@media (max-width: 760px) {
+  .topbar-inner, main { padding-inline: 16px; }
+  .status-strip { margin-left: 0; }
+  .kpis { grid-template-columns: minmax(0,1fr); }
+  .col.right { grid-template-columns: minmax(0,1fr); }
+  .strat-row { grid-template-columns: repeat(2, minmax(0,1fr)); }
+  .strat:nth-child(2) { border-right: 0; }
+  .strat:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
+  #equity { height: 250px; }
+  .kpi-value { font-size: 23px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+</style>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <div class="logo" aria-hidden="true">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M4 18V6l8 9V6m0 12V9l8 9V6" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <div class="brand-name">NEXUS ALGO <span>// Prop &amp; Multi-Broker Hub</span></div>
+    </div>
+    <div class="status-strip">
+      <span class="chip ok" id="failChip"><span class="dot pulse"></span><b>Fail-Closed Active</b> 🟢</span>
+      <span class="chip"><span class="muted">VPS Latency</span> <b class="num pos" id="lat">18ms</b></span>
+      <span class="chip sysc"><span class="muted">Mode</span> <b>Paper / Prop Account #10482</b></span>
+      <span class="chip"><span class="muted">UTC</span> <b class="num" id="clock">14:41:07</b></span>
+      <button class="kill" id="killBtn" type="button">🔴 Panic Kill-Switch</button>
+    </div>
+  </div>
+</header>
+
+<main>
+  <div class="killed-banner" id="killedBanner" hidden>
+    <b>KILL-SWITCH ENGAGED</b>
+    <span>All 6 positions flattened, 4 working orders cancelled, webhook intake locked. Re-arm requires 2FA from the operator console.</span>
+  </div>
+
+  <!-- KPI ROW -->
+  <section class="kpis" aria-label="Key metrics">
+    <article class="panel kpi glow-g">
+      <div class="kpi-label"><span>Today's Net PnL</span><span class="tag g">LIVE</span></div>
+      <div class="kpi-value pos" id="kpiToday">+$1,250.00</div>
+      <div class="kpi-sub"><span class="pos">+0.42%</span><span>Realized +$290.30</span><span>Float +$959.70</span></div>
+      <svg id="spark" viewBox="0 0 300 44" preserveAspectRatio="none" aria-label="Intraday PnL sparkline"></svg>
+    </article>
+
+    <article class="panel kpi">
+      <div class="kpi-label"><span>Weekly / Monthly PnL</span><span class="tag">OCT 2026</span></div>
+      <div class="split">
+        <div><div class="muted" style="font-size:11px">WTD</div><div class="kpi-value pos">+$4,862.40</div><div class="kpi-sub"><span class="pos">+1.63%</span></div></div>
+        <div><div class="muted" style="font-size:11px">MTD</div><div class="kpi-value pos">+$18,400.00</div><div class="kpi-sub"><span class="pos">+6.10%</span></div></div>
+      </div>
+      <div class="kpi-sub"><span>Win rate 64.2%</span><span>PF 2.18</span><span>Sharpe 3.04</span></div>
+      <div class="bar" title="Progress to monthly target $25,000"><i style="width:73.6%;background:var(--profit)"></i></div>
+      <div class="kpi-sub"><span>73.6% of $25,000 monthly target</span></div>
+    </article>
+
+    <article class="panel kpi">
+      <div class="kpi-label"><span>Account Equity &amp; AUM</span><span class="tag i">3 BROKERS</span></div>
+      <div class="kpi-value">$1,248,500</div>
+      <div class="kpi-sub"><span>Total Managed</span></div>
+      <div class="split" style="margin-top:2px">
+        <div><div class="muted" style="font-size:11px">Prop #10482 equity</div><div class="num" style="font-weight:600">$298,890.70</div></div>
+        <div><div class="muted" style="font-size:11px">Margin in use</div><div class="num" style="font-weight:600">18.4% <span class="muted" style="font-weight:400">· $229.7K</span></div></div>
+      </div>
+    </article>
+
+    <article class="panel kpi">
+      <div class="kpi-label"><span>Daily Max Drawdown</span><span class="tag g">SAFE</span></div>
+      <div class="gauge-wrap">
+        <svg viewBox="0 0 120 68" aria-label="23.5% of daily drawdown limit used">
+          <defs>
+            <linearGradient id="gg" x1="0" x2="1">
+              <stop offset="0" stop-color="#10b981"/><stop offset=".6" stop-color="#f59e0b"/><stop offset="1" stop-color="#ef4444"/>
+            </linearGradient>
+          </defs>
+          <path d="M10 60 A50 50 0 0 1 110 60" fill="none" stroke="#1e293b" stroke-width="10" stroke-linecap="round"/>
+          <path d="M10 60 A50 50 0 0 1 110 60" fill="none" stroke="url(#gg)" stroke-width="10" stroke-linecap="round" opacity=".22"/>
+          <path id="gArc" d="M10 60 A50 50 0 0 1 110 60" fill="none" stroke="#10b981" stroke-width="10" stroke-linecap="round" pathLength="100" stroke-dasharray="23.5 100"/>
+          <line id="gNeedle" x1="60" y1="60" x2="60" y2="20" stroke="#e2e8f0" stroke-width="2" stroke-linecap="round" transform="rotate(-47.7 60 60)"/>
+          <circle cx="60" cy="60" r="4" fill="#e2e8f0"/>
+        </svg>
+        <div style="display:grid;gap:2px;min-width:0">
+          <div class="kpi-value neg" style="font-size:22px">−$705</div>
+          <div class="kpi-sub"><span>of −$3,000 limit</span></div>
+          <div class="kpi-sub"><span class="pos">23.5% used</span></div>
+        </div>
+      </div>
+      <div class="kpi-sub"><span>Auto-flatten at −$2,700 (90%)</span><span>Trailing DD $4,120 left</span></div>
+    </article>
+  </section>
+
+  <!-- MAIN GRID -->
+  <section class="grid">
+    <div class="col">
+      <!-- Equity curve -->
+      <article class="panel">
+        <div class="panel-h">
+          <h2>Live Equity Curve &amp; Strategy Performance</h2>
+          <span class="tag g">● streaming</span>
+          <div class="right">
+            <div class="seg" role="group" aria-label="Range">
+              <button type="button" data-range="1D" aria-pressed="true">1D</button>
+              <button type="button" data-range="1W" aria-pressed="false">1W</button>
+              <button type="button" data-range="1M" aria-pressed="false">1M</button>
+            </div>
+          </div>
+        </div>
+        <div class="chart-box" id="chartBox">
+          <svg id="equity" role="img" aria-label="Equity curve with take-profit and stop-loss markers"></svg>
+          <div class="tip" id="tip" hidden></div>
+        </div>
+        <div class="legend">
+          <span><i class="lg-line" style="background:var(--profit)"></i>Equity</span>
+          <span><i class="lg-line" style="background:var(--sys)"></i>Benchmark (NQ B&amp;H)</span>
+          <span><i class="lg-tri" style="border-bottom:8px solid var(--profit)"></i>TP hit</span>
+          <span><i class="lg-tri" style="border-top:8px solid var(--risk)"></i>SL hit</span>
+          <span><i class="lg-line" style="background:var(--risk);opacity:.6"></i>Daily loss floor</span>
+        </div>
+        <div class="strat-row">
+          <div class="strat"><span class="n">ORB-Momentum · NQ</span><span class="v pos">+$842.50</span><span class="m">7 trades · 71% · PF 2.6</span></div>
+          <div class="strat"><span class="n">VWAP-Revert · ES/GC</span><span class="v pos">+$267.50</span><span class="m">5 trades · 60% · PF 1.7</span></div>
+          <div class="strat"><span class="n">Funding-Arb · BTC/ETH</span><span class="v pos">+$220.00</span><span class="m">3 trades · 67% · PF 2.1</span></div>
+          <div class="strat"><span class="n">Breakout-Trend · SOL</span><span class="v neg">−$80.00</span><span class="m">2 trades · 50% · PF 0.8</span></div>
+        </div>
+      </article>
+
+      <!-- Positions -->
+      <article class="panel">
+        <div class="panel-h">
+          <h2>Open Positions</h2>
+          <span class="tag">6 open</span>
+          <div class="right"><span class="tag g">Server-side brackets 6/6</span><span class="tag w">1 modify pending</span></div>
+        </div>
+        <div class="tbl-wrap">
+          <table>
+            <thead>
+              <tr><th>Symbol</th><th>Action</th><th class="r">Qty</th><th class="r">Entry</th><th class="r">Current</th><th class="r">Floating PnL</th><th>Server SL / TP</th><th>Broker</th></tr>
+            </thead>
+            <tbody id="posBody"></tbody>
+            <tfoot><tr><td colspan="5" class="muted" style="font-family:var(--font-ui);font-weight:500">Net floating</td><td class="r" id="posTotal">+$959.70</td><td colspan="2"></td></tr></tfoot>
+          </table>
+        </div>
+      </article>
+    </div>
+
+    <div class="col right">
+      <!-- Allocation -->
+      <article class="panel">
+        <div class="panel-h"><h2>Broker &amp; Account Allocation</h2></div>
+        <div class="panel-b">
+          <div class="alloc-total"><span class="muted">Total managed</span><span class="num">$1,248,500</span></div>
+          <div class="stack">
+            <i style="width:60.07%;background:var(--sys)"></i>
+            <i style="width:29.86%;background:var(--profit)"></i>
+            <i style="width:10.07%;background:#475569"></i>
+          </div>
+          <div class="acct">
+            <i class="sw" style="background:var(--sys)"></i>
+            <div class="nm">Prop Firm Futures<small>3 evals · Rithmic · CME</small></div>
+            <div class="amt">$750,000<small>60.1%</small></div>
+            <div class="meter"><div class="bar"><i style="width:58%;background:var(--sys)"></i></div><div class="kpi-sub" style="margin-top:4px"><span>#10482 $300K · #10477 $250K · #10391 $200K</span></div></div>
+          </div>
+          <div class="acct">
+            <i class="sw" style="background:var(--profit)"></i>
+            <div class="nm">Crypto Exchange<small>USDT-M perps · API sub-acct 02</small></div>
+            <div class="amt">$372,800<small>29.9%</small></div>
+            <div class="meter"><div class="bar"><i style="width:34%;background:var(--profit)"></i></div><div class="kpi-sub" style="margin-top:4px"><span>Lev 3.1× avg · Funding +$41.20 today</span></div></div>
+          </div>
+          <div class="acct">
+            <i class="sw" style="background:#475569"></i>
+            <div class="nm">Cash Reserve<small>Unallocated · stablecoin + USD</small></div>
+            <div class="amt">$125,700<small>10.1%</small></div>
+          </div>
+        </div>
+      </article>
+
+      <!-- Event stream -->
+      <article class="panel">
+        <div class="panel-h">
+          <h2>Webhook Event Stream</h2>
+          <div class="right"><span class="tag i">TV → VPS</span><span class="tag" id="evCount">142 today</span></div>
+        </div>
+        <div class="log" id="log" aria-live="polite"></div>
+      </article>
+
+      <!-- Telegram sync -->
+      <article class="panel">
+        <div class="panel-h"><h2>Telegram Alert Sync</h2><div class="right"><span class="tag g">● Connected</span></div></div>
+        <div class="panel-b">
+          <div class="sync-grid">
+            <div class="sync-item"><span class="l">Bot</span><span class="v">@nexus_algo_bot</span></div>
+            <div class="sync-item"><span class="l">Last push</span><span class="v pos" id="lastPush">4s ago</span></div>
+            <div class="sync-item"><span class="l">Delivered today</span><span class="v">87 / 87</span></div>
+            <div class="sync-item"><span class="l">Avg delivery</span><span class="v">312ms</span></div>
+          </div>
+          <div class="toggles">
+            <div class="tg"><span>Fills &amp; exits</span><button class="sw-t" role="switch" aria-checked="true" aria-label="Fills and exits"></button></div>
+            <div class="tg"><span>Risk rejections</span><button class="sw-t" role="switch" aria-checked="true" aria-label="Risk rejections"></button></div>
+            <div class="tg"><span>Drawdown ≥ 50% warning</span><button class="sw-t" role="switch" aria-checked="true" aria-label="Drawdown warning"></button></div>
+            <div class="tg"><span>Every raw signal</span><button class="sw-t" role="switch" aria-checked="false" aria-label="Every raw signal"></button></div>
+          </div>
+        </div>
+      </article>
+
+      <!-- Telegram console -->
+      <article class="panel tgc">
+        <div class="panel-h"><h2>Telegram Command Preview</h2><div class="right"><span class="tag">Operator chat · 2FA</span></div></div>
+        <div class="chat" id="chat"></div>
+        <div class="cmds">
+          <button class="cmd" type="button" data-cmd="/today">/today</button>
+          <button class="cmd" type="button" data-cmd="/status">/status</button>
+          <button class="cmd" type="button" data-cmd="/positions">/positions</button>
+          <button class="cmd" type="button" data-cmd="/risk">/risk</button>
+          <button class="cmd danger" type="button" data-cmd="/kill">/kill</button>
+        </div>
+      </article>
+    </div>
+  </section>
+
+  <p class="foot">Mockup with simulated data · NEXUS ALGO v2.4.1 · engine node vps-fra-02 · build 7c1e9a</p>
+</main>
+
+<div class="modal-bg" id="modal" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="mTitle">
+    <div class="body">
+      <h3 id="mTitle">Engage Panic Kill-Switch?</h3>
+      <p>This runs immediately across every connected broker:</p>
+      <ul>
+        <li>Flatten 6 open positions at market</li>
+        <li>Cancel 4 working bracket orders</li>
+        <li>Lock webhook intake (fail-closed)</li>
+        <li>Notify operator chat on Telegram</li>
+      </ul>
+    </div>
+    <div class="actions">
+      <button class="btn" type="button" id="mCancel">Cancel</button>
+      <button class="btn red" type="button" id="mConfirm">Flatten everything</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const $ = (s) => document.querySelector(s);
+  const fmt$ = (v, d = 2) => (v >= 0 ? "+" : "−") + "$" + Math.abs(v).toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
+  const px = (v, d) => v.toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
+  const NS = "http://www.w3.org/2000/svg";
+  const el = (tag, attrs = {}, parent) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; };
+
+  // seeded RNG so the mockup renders identically each load
+  let seed = 10482;
+  const rnd = () => { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; };
+
+  /* ---------- clock ---------- */
+  const clock = $("#clock");
+  const tick = () => { const d = new Date(); clock.textContent = d.toISOString().slice(11, 19); };
+  tick(); setInterval(tick, 1000);
+
+  /* ---------- sparkline (today PnL) ---------- */
+  (function spark() {
+    const svg = $("#spark"); const W = 300, H = 44;
+    const pts = []; let v = 0;
+    const target = [0, -180, -420, -705, -520, -150, 240, 610, 480, 820, 1040, 960, 1180, 1250];
+    target.forEach((t, i) => { if (i === 0) { pts.push(t); return; } const a = target[i - 1]; for (let j = 1; j <= 4; j++) pts.push(a + (t - a) * j / 4 + (rnd() - .5) * 90 * (j < 4)); });
+    const min = Math.min(...pts), max = Math.max(...pts);
+    const x = (i) => i / (pts.length - 1) * W, y = (p) => 4 + (1 - (p - min) / (max - min)) * (H - 8);
+    const d = pts.map((p, i) => (i ? "L" : "M") + x(i).toFixed(1) + " " + y(p).toFixed(1)).join("");
+    const defs = el("defs", {}, svg); const lg = el("linearGradient", { id: "sg", x1: 0, x2: 0, y1: 0, y2: 1 }, defs);
+    el("stop", { offset: 0, "stop-color": "#10b981", "stop-opacity": .35 }, lg); el("stop", { offset: 1, "stop-color": "#10b981", "stop-opacity": 0 }, lg);
+    el("line", { x1: 0, x2: W, y1: y(0), y2: y(0), stroke: "#334155", "stroke-dasharray": "3 3", "stroke-width": 1, "vector-effect": "non-scaling-stroke" }, svg);
+    el("path", { d: d + `L${W} ${H}L0 ${H}Z`, fill: "url(#sg)" }, svg);
+    el("path", { d, fill: "none", stroke: "#10b981", "stroke-width": 1.8, "vector-effect": "non-scaling-stroke" }, svg);
+  })();
+
+  /* ---------- equity chart ---------- */
+  const START = 297640.70;
+  function series(range) {
+    seed = range === "1D" ? 777 : range === "1W" ? 1313 : 4242;
+    const n = range === "1D" ? 96 : range === "1W" ? 120 : 132;
+    const endGain = range === "1D" ? 1250 : range === "1W" ? 4862.4 : 18400;
+    const base = START + 1250 - endGain;
+    const eq = [], bm = []; let e = base, b = base, drift = endGain / n;
+    for (let i = 0; i < n; i++) {
+      const shock = (rnd() - .48) * endGain * (range === "1D" ? .09 : .045);
+      e += drift + shock - (range === "1D" && i > 8 && i < 26 ? drift * 3.2 : 0);
+      b += drift * .35 + (rnd() - .5) * endGain * .05;
+      eq.push(e); bm.push(b);
+    }
+    const adj = (START + 1250) - eq[n - 1];
+    for (let i = 0; i < n; i++) eq[i] += adj * (i / (n - 1));
+    // TP / SL markers on local turns
+    const marks = [];
+    for (let i = 4; i < n - 2; i += 1) {
+      if (marks.length && i - marks[marks.length - 1].i < (range === "1D" ? 7 : 9)) continue;
+      const up = eq[i] > eq[i - 3] && eq[i] >= eq[i + 1] && eq[i] - eq[i - 3] > endGain * .03;
+      const dn = eq[i] < eq[i - 3] && eq[i] <= eq[i + 1] && eq[i - 3] - eq[i] > endGain * .025;
+      if (up) marks.push({ i, type: "TP" }); else if (dn) marks.push({ i, type: "SL" });
+    }
+    const syms = ["NQZ6", "ESZ6", "GCZ6", "BTCUSDT", "ETHUSDT", "SOLUSDT"];
+    marks.forEach((m, k) => { m.sym = syms[k % syms.length]; m.pnl = m.type === "TP" ? 120 + rnd() * 520 : -(80 + rnd() * 260); });
+    return { eq, bm, marks, n, range };
+  }
+  function label(range, i, n) {
+    if (range === "1D") { const t = 9 * 60 + 30 + Math.round(i / (n - 1) * (14 * 60 + 41 - (9 * 60 + 30))); return String(Math.floor(t / 60)).padStart(2, "0") + ":" + String(t % 60).padStart(2, "0") + " ET"; }
+    if (range === "1W") { const days = ["Mon 6", "Tue 7", "Wed 8", "Thu 9", "Fri 10"]; return days[Math.min(4, Math.floor(i / n * 5))] + " Oct"; }
+    const d = new Date(Date.UTC(2026, 8, 11) + Math.round(i / (n - 1) * 29) * 864e5);
+    return d.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+  }
+  function axisLabels(range) {
+    if (range === "1D") return ["09:30", "10:45", "12:00", "13:15", "14:30"];
+    if (range === "1W") return ["Mon", "Tue", "Wed", "Thu", "Fri"];
+    return ["Sep 11", "Sep 18", "Sep 25", "Oct 2", "Oct 9"];
+  }
+
+  const svg = $("#equity"), tip = $("#tip"), box = $("#chartBox");
+  let cur;
+  function draw(range) {
+    cur = series(range);
+    const { eq, bm, marks, n } = cur;
+    const W = svg.clientWidth || 800, H = svg.clientHeight || 320;
+    svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+    svg.innerHTML = "";
+    const L = 64, R = 16, T = 16, B = 28;
+    const floor = START - 3000;
+    const all = eq.concat(bm, range === "1D" ? [floor] : []);
+    let min = Math.min(...all), max = Math.max(...all); const pad = (max - min) * .08; min -= pad; max += pad;
+    const x = (i) => L + i / (n - 1) * (W - L - R);
+    const y = (v) => T + (1 - (v - min) / (max - min)) * (H - T - B);
+    cur.x = x; cur.y = y; cur.L = L; cur.R = R; cur.W = W;
+
+    const defs = el("defs", {}, svg);
+    const g1 = el("linearGradient", { id: "eqg", x1: 0, x2: 0, y1: 0, y2: 1 }, defs);
+    el("stop", { offset: 0, "stop-color": "#10b981", "stop-opacity": .28 }, g1);
+    el("stop", { offset: 1, "stop-color": "#10b981", "stop-opacity": 0 }, g1);
+    const glow = el("filter", { id: "glow", x: "-20%", y: "-20%", width: "140%", height: "140%" }, defs);
+    el("feGaussianBlur", { stdDeviation: 3, result: "b" }, glow);
+    const mg = el("feMerge", {}, glow); el("feMergeNode", { in: "b" }, mg); el("feMergeNode", { in: "SourceGraphic" }, mg);
+
+    // grid + y labels
+    const ticks = 5;
+    for (let k = 0; k <= ticks; k++) {
+      const v = min + (max - min) * k / ticks, yy = y(v);
+      el("line", { x1: L, x2: W - R, y1: yy, y2: yy, stroke: "#1e293b", "stroke-width": 1 }, svg);
+      const t = el("text", { x: L - 8, y: yy + 4, "text-anchor": "end", fill: "#5b6a85", "font-size": 11, "font-family": "IBM Plex Mono, monospace" }, svg);
+      t.textContent = "$" + (v / 1000).toFixed(1) + "K";
+    }
+    axisLabels(range).forEach((s, k, arr) => {
+      const t = el("text", { x: L + k / (arr.length - 1) * (W - L - R), y: H - 8, "text-anchor": k === 0 ? "start" : k === arr.length - 1 ? "end" : "middle", fill: "#5b6a85", "font-size": 11, "font-family": "IBM Plex Mono, monospace" }, svg);
+      t.textContent = s;
+    });
+    // loss floor
+    if (range === "1D") {
+      el("line", { x1: L, x2: W - R, y1: y(floor), y2: y(floor), stroke: "#ef4444", "stroke-opacity": .6, "stroke-dasharray": "5 4", "stroke-width": 1 }, svg);
+      const t = el("text", { x: W - R - 4, y: y(floor) - 6, "text-anchor": "end", fill: "#ef4444", "font-size": 10.5, "font-family": "IBM Plex Mono, monospace" }, svg);
+      t.textContent = "DAILY LOSS FLOOR $" + px(floor, 0);
+      el("line", { x1: L, x2: W - R, y1: y(START), y2: y(START), stroke: "#475569", "stroke-dasharray": "2 4", "stroke-width": 1 }, svg);
+    }
+    const path = (arr) => arr.map((v, i) => (i ? "L" : "M") + x(i).toFixed(1) + " " + y(v).toFixed(1)).join("");
+    el("path", { d: path(bm), fill: "none", stroke: "#6366f1", "stroke-width": 1.4, "stroke-opacity": .75 }, svg);
+    el("path", { d: path(eq) + `L${x(n - 1)} ${H - B}L${x(0)} ${H - B}Z`, fill: "url(#eqg)" }, svg);
+    el("path", { d: path(eq), fill: "none", stroke: "#10b981", "stroke-width": 2, filter: "url(#glow)" }, svg);
+
+    marks.forEach((m) => {
+      const cx = x(m.i), cy = y(eq[m.i]);
+      const g = el("g", {}, svg);
+      if (m.type === "TP") el("path", { d: `M${cx} ${cy - 16} l6 10 h-12 z`, fill: "#10b981" }, g);
+      else el("path", { d: `M${cx} ${cy + 16} l6 -10 h-12 z`, fill: "#ef4444" }, g);
+      el("line", { x1: cx, x2: cx, y1: cy, y2: m.type === "TP" ? cy - 6 : cy + 6, stroke: m.type === "TP" ? "#10b981" : "#ef4444", "stroke-width": 1 }, g);
+    });
+    // endpoint
+    const ex = x(n - 1), ey = y(eq[n - 1]);
+    el("circle", { cx: ex, cy: ey, r: 9, fill: "#10b981", "fill-opacity": .18 }, svg);
+    el("circle", { cx: ex, cy: ey, r: 4, fill: "#10b981", stroke: "#0f172a", "stroke-width": 2 }, svg);
+
+    // crosshair
+    cur.vline = el("line", { x1: 0, x2: 0, y1: T, y2: H - B, stroke: "#64748b", "stroke-dasharray": "3 3", visibility: "hidden" }, svg);
+    cur.dot = el("circle", { r: 4, fill: "#10b981", stroke: "#e2e8f0", "stroke-width": 1.5, visibility: "hidden" }, svg);
+  }
+  function hover(ev) {
+    if (!cur) return;
+    const r = svg.getBoundingClientRect();
+    const mx = ev.clientX - r.left;
+    const i = Math.max(0, Math.min(cur.n - 1, Math.round((mx - cur.L) / (cur.W - cur.L - cur.R) * (cur.n - 1))));
+    const cx = cur.x(i), cy = cur.y(cur.eq[i]);
+    cur.vline.setAttribute("x1", cx); cur.vline.setAttribute("x2", cx); cur.vline.setAttribute("visibility", "visible");
+    cur.dot.setAttribute("cx", cx); cur.dot.setAttribute("cy", cy); cur.dot.setAttribute("visibility", "visible");
+    const m = cur.marks.find((k) => Math.abs(k.i - i) <= 1);
+    const chg = cur.eq[i] - cur.eq[0];
+    tip.innerHTML = `<div class="muted">${label(cur.range, i, cur.n)}</div>
+      <div>Equity <b>$${px(cur.eq[i], 2)}</b></div>
+      <div>Δ range <b class="${chg >= 0 ? "pos" : "neg"}">${fmt$(chg)}</b></div>` +
+      (m ? `<div style="margin-top:4px;padding-top:4px;border-top:1px solid #273449"><b class="${m.type === "TP" ? "pos" : "neg"}">${m.type === "TP" ? "▲ TP" : "▼ SL"} ${m.sym}</b> ${fmt$(m.pnl)}</div>` : "");
+    tip.hidden = false;
+    const bw = box.clientWidth, tw = tip.offsetWidth;
+    tip.style.left = Math.min(bw - tw - 8, Math.max(8, cx + 14)) + "px";
+    tip.style.top = Math.max(8, cy - 70) + "px";
+  }
+  svg.addEventListener("pointermove", hover);
+  svg.addEventListener("pointerleave", () => { tip.hidden = true; if (cur) { cur.vline.setAttribute("visibility", "hidden"); cur.dot.setAttribute("visibility", "hidden"); } });
+  let range = "1D";
+  document.querySelectorAll(".seg button").forEach((b) => b.addEventListener("click", () => {
+    document.querySelectorAll(".seg button").forEach((o) => o.setAttribute("aria-pressed", String(o === b)));
+    range = b.dataset.range; draw(range);
+  }));
+  draw(range);
+  let rt; window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => draw(range), 120); });
+
+  /* ---------- positions ---------- */
+  const positions = [
+    { s: "NQZ6", d: "E-mini Nasdaq-100 · Dec", side: "BUY", q: 1, e: 20412.25, c: 20438.50, mult: 20, dp: 2, sl: "20,371.00", tp: "20,495.00", st: "ok", br: "Prop #10482" },
+    { s: "ESZ6", d: "E-mini S&P 500 · Dec", side: "SELL", q: 1, e: 5842.50, c: 5846.75, mult: 50, dp: 2, sl: "5,856.00", tp: "5,815.50", st: "ok", br: "Prop #10482" },
+    { s: "GCZ6", d: "Gold · Dec", side: "BUY", q: 1, e: 2684.30, c: 2689.10, mult: 100, dp: 2, sl: "2,676.80", tp: "2,701.50", st: "trail", br: "Prop #10477" },
+    { s: "BTCUSDT", d: "Perp · 3× isolated", side: "BUY", q: 0.35, e: 62180.0, c: 62744.0, mult: 1, dp: 1, sl: "61,420.0", tp: "63,900.0", st: "ok", br: "Crypto sub-02" },
+    { s: "ETHUSDT", d: "Perp · 3× isolated", side: "SELL", q: 4.0, e: 2452.80, c: 2447.15, mult: 1, dp: 2, sl: "2,489.00", tp: "2,398.00", st: "pend", br: "Crypto sub-02" },
+    { s: "SOLUSDT", d: "Perp · 2× isolated", side: "BUY", q: 120, e: 142.36, c: 141.92, mult: 1, dp: 2, sl: "139.80", tp: "147.40", st: "ok", br: "Crypto sub-02" },
+  ];
+  const pnl = (p) => (p.c - p.e) * (p.side === "BUY" ? 1 : -1) * p.q * p.mult;
+  const prot = (p) => {
+    const sl = `<span class="tag r" title="Stop at ${p.sl}">SL ${p.sl} ✓</span>`;
+    const tp = p.st === "pend" ? `<span class="tag w" title="Modify in flight">TP ${p.tp} ⟳</span>` : p.st === "trail" ? `<span class="tag i">TP ${p.tp} · trail</span>` : `<span class="tag g">TP ${p.tp} ✓</span>`;
+    return `<span class="prot">${sl}${tp}</span>`;
+  };
+  const tbody = $("#posBody");
+  function renderPos(flash) {
+    let tot = 0;
+    tbody.innerHTML = positions.map((p, i) => {
+      const v = pnl(p); tot += v;
+      const f = flash && flash[i] ? (flash[i] > 0 ? "flash-up" : "flash-dn") : "";
+      return `<tr>
+        <td><span class="sym">${p.s}<small>${p.d}</small></span></td>
+        <td><span class="side ${p.side.toLowerCase()}">${p.side}</span></td>
+        <td class="r">${p.q}</td>
+        <td class="r">${px(p.e, p.dp)}</td>
+        <td class="r ${f}">${px(p.c, p.dp)}</td>
+        <td class="r ${v >= 0 ? "pos" : "neg"}">${fmt$(v)}</td>
+        <td>${prot(p)}</td>
+        <td class="muted" style="font-family:var(--font-ui)">${p.br}</td></tr>`;
+    }).join("");
+    const t = $("#posTotal"); t.textContent = fmt$(tot); t.className = "r " + (tot >= 0 ? "pos" : "neg");
+    return tot;
+  }
+  renderPos();
+
+  /* ---------- event stream ---------- */
+  const log = $("#log");
+  const seedEvents = [
+    ["14:41:02", "FILL", "BTCUSDT BUY 0.35 @ 62,180.0 <em>· slip 0.4 bps · 41ms</em>"],
+    ["14:41:02", "RISK", "✓ BTCUSDT passed 6/6 checks <em>· size 0.35 ≤ cap 0.50 · DD 23.5%</em>"],
+    ["14:41:01", "SIG", "TradingView ▸ Breakout-Trend BTCUSDT LONG <em>· hook→VPS 18ms</em>"],
+    ["14:38:47", "SYS", "Bracket modify sent ETHUSDT TP 2,405 → 2,398 <em>· awaiting ack</em>"],
+    ["14:36:15", "REJ", "✕ NQZ6 LONG rejected: max 1 concurrent contract per symbol"],
+    ["14:36:15", "SIG", "TradingView ▸ ORB-Momentum NQZ6 LONG (dup) <em>· 22ms</em>"],
+    ["14:31:09", "TP", "GCZ6 partial TP 1/2 @ 2,688.90 <em>· +$460.00</em>"],
+    ["14:22:40", "SL", "SOLUSDT prior leg stopped @ 140.95 <em>· −$168.00</em>"],
+    ["14:20:03", "RISK", "✓ Session window OK · news blackout clear (CPI 08:30 passed)"],
+    ["14:12:56", "FILL", "ESZ6 SELL 1 @ 5,842.50 <em>· Rithmic · 9ms</em>"],
+    ["14:12:55", "SIG", "TradingView ▸ VWAP-Revert ESZ6 SHORT <em>· 17ms</em>"],
+    ["14:02:11", "SYS", "Heartbeat OK · 3 brokers · clock skew 2ms"],
+  ];
+  const evRow = ([t, k, m]) => `<div class="ev"><span class="t">${t}</span><span class="k ${k}">${k}</span><span class="msg">${m}</span></div>`;
+  log.innerHTML = seedEvents.map(evRow).join("");
+  let evCount = 142;
+  const liveEv = [
+    () => ["SIG", `TradingView ▸ ORB-Momentum NQZ6 ${rnd() > .5 ? "LONG" : "SHORT"} <em>· ${14 + Math.round(rnd() * 9)}ms</em>`],
+    () => ["RISK", `✓ Exposure check · net delta $${(180 + rnd() * 60).toFixed(1)}K ≤ $300K cap`],
+    () => ["SYS", `Heartbeat OK · 3 brokers · VPS ${16 + Math.round(rnd() * 5)}ms`],
+    () => ["REJ", `✕ ETHUSDT SHORT rejected: duplicate signal within 30s window`],
+    () => ["RISK", `✓ Server SL/TP verified on 6/6 positions`],
+  ];
+  let killed = false;
+  const now = () => new Date().toISOString().slice(11, 19);
+  function pushEv(k, m) {
+    log.insertAdjacentHTML("afterbegin", evRow([now(), k, m]));
+    while (log.children.length > 40) log.lastElementChild.remove();
+    evCount++; $("#evCount").textContent = evCount + " today";
+  }
+
+  /* ---------- live ticking ---------- */
+  let pushAge = 4;
+  setInterval(() => {
+    pushAge++; $("#lastPush").textContent = pushAge + "s ago";
+  }, 1000);
+  setInterval(() => {
+    if (killed) return;
+    const flash = positions.map((p) => {
+      const step = p.e * 0.00012 * (rnd() - .5) * 2;
+      const old = p.c; p.c = Math.round((p.c + step) * 100) / 100; return Math.sign(p.c - old);
+    });
+    const tot = renderPos(flash);
+    const today = 290.30 + tot;
+    const k = $("#kpiToday"); k.textContent = fmt$(today); k.className = "kpi-value " + (today >= 0 ? "pos" : "neg");
+    $("#lat").textContent = (15 + Math.round(rnd() * 6)) + "ms";
+  }, 2200);
+  setInterval(() => {
+    if (killed) return;
+    const [k, m] = liveEv[Math.floor(rnd() * liveEv.length)]();
+    pushEv(k, m); pushAge = 0;
+  }, 5200);
+
+  /* ---------- telegram console ---------- */
+  const chat = $("#chat");
+  const hhmm = () => new Date().toISOString().slice(11, 16);
+  function bubble(kind, text, ts) {
+    const d = document.createElement("div"); d.className = "msg-b " + kind;
+    d.innerHTML = (kind === "bot" ? '<span class="who">Nexus Algo Bot</span>' : "") + text + `<span class="ts">${ts || hhmm()}</span>`;
+    chat.appendChild(d); chat.scrollTop = chat.scrollHeight;
+  }
+  const totalFloat = () => positions.reduce((a, p) => a + pnl(p), 0);
+  const replies = {
+    "/today": () => `📊 Today · Prop #10482
+Net PnL      ${fmt$(290.30 + totalFloat())}  (+0.42%)
+Realized     +$290.30 · 17 trades
+Floating     ${fmt$(totalFloat())} · 6 open
+Win rate     64.7% (11W / 6L)
+Max DD       −$705 / −$3,000 ✅`,
+    "/status": () => killed ? `⛔ ENGINE HALTED
+Kill-switch engaged ${hhmm()} UTC
+Webhooks: LOCKED · Positions: 0` : `🟢 Engine RUNNING · fail-closed
+VPS vps-fra-02 · ${$("#lat").textContent} · uptime 6d 14h
+Brokers  Rithmic ✓ · Crypto API ✓
+Webhooks 142 rx · 3 rejected · 0 errors
+Brackets 6/6 server-side ✓`,
+    "/positions": () => positions.map((p) => `${p.side === "BUY" ? "🟢" : "🔴"} ${p.s.padEnd(8)} ${p.side} ${p.q}  ${fmt$(pnl(p))}`).join("\n"),
+    "/risk": () => `🛡 Risk guard
+Daily DD    23.5% of $3,000 · SAFE
+Trailing DD $4,120 headroom
+Exposure    $229.7K / $300K cap
+Next news   FOMC mins Wed 14:00 ET`,
+    "/kill": () => `⚠️ Confirm kill-switch?
+Reply /kill CONFIRM 7731 within 60s.
+This flattens 6 positions and locks webhooks.`,
+  };
+  bubble("me", "/today", "14:35");
+  bubble("bot", replies["/today"](), "14:35");
+  bubble("me", "/status", "14:38");
+  bubble("bot", replies["/status"](), "14:38");
+  document.querySelectorAll(".cmd").forEach((b) => b.addEventListener("click", () => {
+    const c = b.dataset.cmd; bubble("me", c);
+    setTimeout(() => bubble("bot", replies[c]()), 450);
+  }));
+
+  /* ---------- toggles ---------- */
+  document.querySelectorAll(".sw-t").forEach((s) => s.addEventListener("click", () => s.setAttribute("aria-checked", String(s.getAttribute("aria-checked") !== "true"))));
+
+  /* ---------- kill switch ---------- */
+  const modal = $("#modal");
+  $("#killBtn").addEventListener("click", () => { if (!killed) { modal.hidden = false; $("#mCancel").focus(); } });
+  $("#mCancel").addEventListener("click", () => { modal.hidden = true; });
+  modal.addEventListener("click", (e) => { if (e.target === modal) modal.hidden = true; });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") modal.hidden = true; });
+  $("#mConfirm").addEventListener("click", () => {
+    modal.hidden = true; killed = true;
+    $("#killedBanner").hidden = false;
+    const btn = $("#killBtn"); btn.textContent = "⛔ HALTED"; btn.style.animation = "none"; btn.style.filter = "grayscale(.4)";
+    const chip = $("#failChip"); chip.className = "chip"; chip.style.borderColor = "rgba(239,68,68,.5)"; chip.style.background = "var(--risk-soft)";
+    chip.innerHTML = '<span class="dot" style="background:var(--risk);box-shadow:0 0 8px var(--risk)"></span><b>Engine Halted</b> 🔴';
+    pushEv("SL", "KILL-SWITCH ▸ flatten-all sent to 3 brokers <em>· 6 positions</em>");
+    pushEv("SYS", "Webhook intake LOCKED · fail-closed");
+    bubble("bot", `⛔ KILL-SWITCH ENGAGED ${hhmm()} UTC
+6 positions flattened · 4 orders cancelled
+Locked PnL ${fmt$(290.30 + totalFloat())}`);
+  });
+})();
+</script>
